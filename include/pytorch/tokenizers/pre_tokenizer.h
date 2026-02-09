@@ -263,6 +263,21 @@ class SequencePreTokenizer : public PreTokenizer {
  private:
   const std::vector<PreTokenizer::Ptr> pre_tokenizers_;
 
-}; // end class ByteLevelPreTokenizer
+}; // end class SequencePreTokenizer
+
+// -- Bert ---------------------------------------------------------------------
+// Used for BERT-style pre-tokenization (splitting on whitespace and
+// punctuation) CITE:
+// https://github.com/huggingface/tokenizers/blob/main/tokenizers/src/pre_tokenizers/bert.rs
+
+class BertPreTokenizer : public PreTokenizer {
+ public:
+  BertPreTokenizer() = default;
+
+  /** Perform BERT pre-tokenization */
+  std::vector<std::string> pre_tokenize(
+      const std::string& input) const override;
+
+}; // end class BertPreTokenizer
 
 } // namespace tokenizers

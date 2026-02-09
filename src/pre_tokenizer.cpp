@@ -96,6 +96,9 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
         [](const PreTokenizerConfig& cfg) { return cfg.create(); });
     return PreTokenizer::Ptr(new SequencePreTokenizer(pretoks));
   }
+  if (type == "BertPreTokenizer") {
+    return PreTokenizer::Ptr(new BertPreTokenizer());
+  }
   throw std::runtime_error("Unsupported PreTokenizer type: " + type);
 }
 
@@ -142,13 +145,16 @@ PreTokenizerConfig& PreTokenizerConfig::parse_json(const json& json_config) {
     for (const auto& entry : json_config.at("pretokenizers")) {
       pretokenizers->push_back(PreTokenizerConfig().parse_json(entry));
     }
+  } else if (type == "BertPreTokenizer") {
+    // BertPreTokenizer has no additional configuration parameters
   } else {
     throw std::runtime_error("Unsupported PreTokenizer type: " + type);
   }
   return *this;
 }
 
-// RegexPreTokenizer ///////////////////////////////////////////////////////////
+// RegexPreTokenizer
+// ///////////////////////////////////////////////////////////
 
 std::unique_ptr<IRegex> RegexPreTokenizer::create_regex_(
     const std::string& pattern) {
@@ -253,7 +259,8 @@ std::vector<std::string> RegexPreTokenizer::pre_tokenize(
   return results;
 }
 
-// ByteLevelPreTokenizer ///////////////////////////////////////////////////////
+// ByteLevelPreTokenizer
+// ///////////////////////////////////////////////////////
 
 //////////////////
 // Impl Details //
@@ -289,7 +296,8 @@ std::vector<std::string> ByteLevelPreTokenizer::pre_tokenize(
   return unicode_regex_split(formatted_input, {pattern_});
 }
 
-// SequencePreTokenizer ////////////////////////////////////////////////////////
+// SequencePreTokenizer
+// ////////////////////////////////////////////////////////
 
 SequencePreTokenizer::SequencePreTokenizer(
     std::vector<PreTokenizer::Ptr> pre_tokenizers)
@@ -308,6 +316,86 @@ std::vector<std::string> SequencePreTokenizer::pre_tokenize(
     pieces = std::move(new_pieces);
   }
   return pieces;
+}
+
+// BertPreTokenizer
+// ////////////////////////////////////////////////////////
+
+namespace {
+bool is_bert_punc(uint32_t cp) {
+  if ((cp >= 33 && cp <= 47) || (cp >= 58 && cp <= 64) ||
+      (cp >= 91 && cp <= 96) || (cp >= 123 && cp <= 126)) {
+    return true;
+  }
+  return unicode_cpt_flags(cp).is_punctuation;
+}
+
+bool is_cjk(uint32_t c) {
+  return (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF) ||
+      (c >= 0x20000 && c <= 0x2A6DF) || (c >= 0x2A700 && c <= 0x2B73F) ||
+      (c >= 0x2B740 && c <= 0x2B81F) || (c >= 0x2B920 && c <= 0x2CEAF) ||
+      (c >= 0xF900 && c <= 0xFAFF) || (c >= 0x2F800 && c <= 0x2FA1F);
+}
+} // namespace
+
+std::vector<std::string> BertPreTokenizer::pre_tokenize(
+    const std::string& input) const {
+  // 1. Split by whitespace (behavior: Removed)
+  std::vector<std::string> words;
+  std::vector<uint32_t> cpts = unicode_cpts_from_utf8(input);
+  std::vector<uint32_t> current_word;
+  for (uint32_t cp : cpts) {
+    if (unicode_cpt_flags(cp).is_whitespace) {
+      if (!current_word.empty()) {
+        std::string s;
+        for (uint32_t wcp : current_word) {
+          s += unicode_cpt_to_utf8(wcp);
+        }
+        words.push_back(s);
+        current_word.clear();
+      }
+    } else {
+      current_word.push_back(cp);
+    }
+  }
+  if (!current_word.empty()) {
+    std::string s;
+    for (uint32_t wcp : current_word) {
+      s += unicode_cpt_to_utf8(wcp);
+    }
+    words.push_back(s);
+  }
+
+  // 2. Split by punctuation and CJK (behavior: Isolated)
+  std::vector<std::string> final_tokens;
+  for (const auto& word : words) {
+    std::vector<uint32_t> word_cpts = unicode_cpts_from_utf8(word);
+    std::vector<uint32_t> current_token;
+    for (uint32_t cp : word_cpts) {
+      if (is_bert_punc(cp) || is_cjk(cp)) {
+        if (!current_token.empty()) {
+          std::string s;
+          for (uint32_t tcp : current_token) {
+            s += unicode_cpt_to_utf8(tcp);
+          }
+          final_tokens.push_back(s);
+          current_token.clear();
+        }
+        final_tokens.push_back(unicode_cpt_to_utf8(cp));
+      } else {
+        current_token.push_back(cp);
+      }
+    }
+    if (!current_token.empty()) {
+      std::string s;
+      for (uint32_t tcp : current_token) {
+        s += unicode_cpt_to_utf8(tcp);
+      }
+      final_tokens.push_back(s);
+    }
+  }
+
+  return final_tokens;
 }
 
 } // namespace tokenizers
