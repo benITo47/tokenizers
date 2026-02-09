@@ -159,6 +159,11 @@ PostProcessor::Ptr PostProcessorConfig::create() const {
   } else if (type == "ByteLevel") {
     // Return no-op sequence
     return std::make_shared<Sequence>(std::vector<PostProcessor::Ptr>{});
+  } else if (type == "BertProcessing") {
+    return std::make_shared<BertProcessing>(sep, cls);
+  } else if (type == "RobertaProcessing") {
+    return std::make_shared<RobertaProcessing>(
+        sep, cls, trim_offsets, add_prefix_space);
   }
 
   throw std::runtime_error("Unsupported PostProcessor type: " + type);
@@ -182,6 +187,30 @@ PostProcessorConfig& PostProcessorConfig::parse_json(const json& j) {
       for (const auto& item : j["processors"]) {
         processors.push_back(PostProcessorConfig().parse_json(item));
       }
+    }
+  } else if (type == "BertProcessing") {
+    if (j.contains("sep")) {
+      sep = parse_pair(j["sep"]);
+    }
+    if (j.contains("cls")) {
+      cls = parse_pair(j["cls"]);
+    }
+  } else if (type == "RobertaProcessing") {
+    if (j.contains("sep")) {
+      sep = parse_pair(j["sep"]);
+    } else {
+      sep = {"</s>", 2};
+    }
+    if (j.contains("cls")) {
+      cls = parse_pair(j["cls"]);
+    } else {
+      cls = {"<s>", 0};
+    }
+    if (j.contains("trim_offsets")) {
+      trim_offsets = j["trim_offsets"];
+    }
+    if (j.contains("add_prefix_space")) {
+      add_prefix_space = j["add_prefix_space"];
     }
   }
 
@@ -297,6 +326,100 @@ std::vector<uint64_t> Sequence::process(
     current = processors_[i]->process(current, add_special_tokens);
   }
   return current;
+}
+
+// BertProcessing //////////////////////////////////////////////////////////////
+
+BertProcessing::BertProcessing(
+    std::pair<std::string, uint64_t> sep,
+    std::pair<std::string, uint64_t> cls)
+    : sep_(std::move(sep)), cls_(std::move(cls)) {}
+
+size_t BertProcessing::added_tokens(bool is_pair) const {
+  return is_pair ? 3 : 2;
+}
+
+std::vector<uint64_t> BertProcessing::process(
+    const std::vector<uint64_t>& tokens,
+    bool add_special_tokens) const {
+  if (!add_special_tokens) {
+    return tokens;
+  }
+  std::vector<uint64_t> result;
+  result.reserve(tokens.size() + 2);
+  result.push_back(cls_.second);
+  result.insert(result.end(), tokens.begin(), tokens.end());
+  result.push_back(sep_.second);
+  return result;
+}
+
+std::vector<uint64_t> BertProcessing::process(
+    const std::vector<uint64_t>& tokens_a,
+    const std::vector<uint64_t>& tokens_b,
+    bool add_special_tokens) const {
+  if (!add_special_tokens) {
+    std::vector<uint64_t> result = tokens_a;
+    result.insert(result.end(), tokens_b.begin(), tokens_b.end());
+    return result;
+  }
+  std::vector<uint64_t> result;
+  result.reserve(tokens_a.size() + tokens_b.size() + 3);
+  result.push_back(cls_.second);
+  result.insert(result.end(), tokens_a.begin(), tokens_a.end());
+  result.push_back(sep_.second);
+  result.insert(result.end(), tokens_b.begin(), tokens_b.end());
+  result.push_back(sep_.second);
+  return result;
+}
+
+// RobertaProcessing ///////////////////////////////////////////////////////////
+
+RobertaProcessing::RobertaProcessing(
+    std::pair<std::string, uint64_t> sep,
+    std::pair<std::string, uint64_t> cls,
+    bool trim_offsets,
+    bool add_prefix_space)
+    : sep_(std::move(sep)),
+      cls_(std::move(cls)),
+      trim_offsets_(trim_offsets),
+      add_prefix_space_(add_prefix_space) {}
+
+size_t RobertaProcessing::added_tokens(bool is_pair) const {
+  return is_pair ? 4 : 2;
+}
+
+std::vector<uint64_t> RobertaProcessing::process(
+    const std::vector<uint64_t>& tokens,
+    bool add_special_tokens) const {
+  if (!add_special_tokens) {
+    return tokens;
+  }
+  std::vector<uint64_t> result;
+  result.reserve(tokens.size() + 2);
+  result.push_back(cls_.second);
+  result.insert(result.end(), tokens.begin(), tokens.end());
+  result.push_back(sep_.second);
+  return result;
+}
+
+std::vector<uint64_t> RobertaProcessing::process(
+    const std::vector<uint64_t>& tokens_a,
+    const std::vector<uint64_t>& tokens_b,
+    bool add_special_tokens) const {
+  if (!add_special_tokens) {
+    std::vector<uint64_t> result = tokens_a;
+    result.insert(result.end(), tokens_b.begin(), tokens_b.end());
+    return result;
+  }
+  std::vector<uint64_t> result;
+  result.reserve(tokens_a.size() + tokens_b.size() + 4);
+  result.push_back(cls_.second);
+  result.insert(result.end(), tokens_a.begin(), tokens_a.end());
+  result.push_back(sep_.second);
+  result.push_back(sep_.second);
+  result.insert(result.end(), tokens_b.begin(), tokens_b.end());
+  result.push_back(sep_.second);
+  return result;
 }
 
 } // namespace tokenizers

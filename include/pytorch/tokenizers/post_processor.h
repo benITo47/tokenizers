@@ -38,6 +38,10 @@ class PostProcessor {
 
   /**
    * Process the token IDs (single sequence).
+   *
+   * NOTE: Unlike the Rust implementation which  uses a single method
+   * taking  Encoding and an Option<Encoding>, we use overloads here
+   * to explicitly handle single vs pair sequences while processing raw IDs.
    */
   virtual std::vector<uint64_t> process(
       const std::vector<uint64_t>& tokens,
@@ -54,7 +58,20 @@ class PostProcessor {
 
 // -- Factory/Common Types -----------------------------------------------------
 
+// Helper macro to standardize addition of config member fields
+#define POST_PROCESSOR_CONFIG_MEMBER(type, name) \
+  PostProcessorConfig& set_##name(type arg) {    \
+    this->name = std::move(arg);                 \
+    return *this;                                \
+  }
+
 enum class SequenceId { A, B };
+
+struct SpecialToken {
+  std::string id;
+  std::vector<uint64_t> ids;
+  std::vector<std::string> tokens;
+};
 
 struct Piece {
   bool is_special_token;
@@ -70,11 +87,45 @@ struct Piece {
 };
 
 using Template = std::vector<Piece>;
+// -- Config -------------------------------------------------------------------
 
-struct SpecialToken {
-  std::string id;
-  std::vector<uint64_t> ids;
-  std::vector<std::string> tokens;
+class PostProcessorConfig {
+ public:
+  using SpecialTokenMap = std::map<std::string, tokenizers::SpecialToken>;
+  using StringIdPair = std::pair<std::string, uint64_t>;
+
+  std::string type;
+
+  // TemplateProcessing
+  POST_PROCESSOR_CONFIG_MEMBER(Template, single)
+  POST_PROCESSOR_CONFIG_MEMBER(Template, pair)
+  POST_PROCESSOR_CONFIG_MEMBER(SpecialTokenMap, special_tokens)
+
+  Template single;
+  Template pair;
+  SpecialTokenMap special_tokens;
+
+  // Bert / Roberta (unused params in no-op, but kept for parsing logic)
+  POST_PROCESSOR_CONFIG_MEMBER(StringIdPair, sep)
+  POST_PROCESSOR_CONFIG_MEMBER(StringIdPair, cls)
+  POST_PROCESSOR_CONFIG_MEMBER(bool, trim_offsets)
+  POST_PROCESSOR_CONFIG_MEMBER(bool, add_prefix_space)
+
+  StringIdPair sep;
+  StringIdPair cls;
+  bool trim_offsets = true;
+  bool add_prefix_space = true;
+
+  // Sequence
+  POST_PROCESSOR_CONFIG_MEMBER(std::vector<PostProcessorConfig>, processors)
+
+  std::vector<PostProcessorConfig> processors;
+
+  explicit PostProcessorConfig(std::string type = "");
+
+  PostProcessor::Ptr create() const;
+
+  PostProcessorConfig& parse_json(const nlohmann::json& json_config);
 };
 
 // -- TemplateProcessing -------------------------------------------------------
@@ -130,36 +181,8 @@ class Sequence : public PostProcessor {
   std::vector<PostProcessor::Ptr> processors_;
 };
 
-// -- Config -------------------------------------------------------------------
-
-class PostProcessorConfig {
- public:
-  std::string type;
-
-  // TemplateProcessing
-  Template single;
-  Template pair;
-  std::map<std::string, SpecialToken> special_tokens;
-
-  // Bert / Roberta (unused params in no-op, but kept for parsing logic)
-  std::pair<std::string, uint64_t> sep;
-  std::pair<std::string, uint64_t> cls;
-  bool trim_offsets = true;
-  bool add_prefix_space = true;
-
-  // Sequence
-  std::vector<PostProcessorConfig> processors;
-
-  explicit PostProcessorConfig(std::string type = "");
-
-  PostProcessor::Ptr create() const;
-
-  PostProcessorConfig& parse_json(const nlohmann::json& json_config);
-};
-
 // -- BertProcessing -----------------------------------------------------------
-// TODO: Implement BertProcessor
-/*
+// Used for BERT post-processing (adding special tokens)
 class BertProcessing : public PostProcessor {
  public:
   BertProcessing(
@@ -181,11 +204,9 @@ class BertProcessing : public PostProcessor {
   std::pair<std::string, uint64_t> sep_;
   std::pair<std::string, uint64_t> cls_;
 };
-*/
 
 // -- RobertaProcessing --------------------------------------------------------
-// TODO: Implement RobertaProcessor
-/*
+// Used for RoBERTa post-processing
 class RobertaProcessing : public PostProcessor {
  public:
   RobertaProcessing(
@@ -211,7 +232,6 @@ class RobertaProcessing : public PostProcessor {
   bool trim_offsets_;
   bool add_prefix_space_;
 };
-*/
 
 // -- ByteLevel
 // ----------------------------------------------------------------
