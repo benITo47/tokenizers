@@ -46,6 +46,9 @@ TokenDecoder::Ptr TokenDecoderConfig::create() const {
     // Use parsed content, start, and stop from JSON
     return TokenDecoder::Ptr(
         new StripTokenDecoder(strip_content, strip_start, strip_stop));
+  } else if (type == "WordPiece") {
+    return TokenDecoder::Ptr(
+        new WordPieceTokenDecoder(wordpiece_prefix, wordpiece_cleanup));
   } else if (type == "Sequence") {
     // Parse the decoders array from JSON and create sub-decoders
     std::vector<TokenDecoder::Ptr> decoders;
@@ -71,6 +74,9 @@ TokenDecoderConfig& TokenDecoderConfig::parse_json(const json& json_config) {
       }
       replace_content = json_config["content"];
     }
+  } else if (type == "WordPiece") {
+    wordpiece_prefix = json_config.value("prefix", "##");
+    wordpiece_cleanup = json_config.value("cleanup", true);
   } else if (type == "ByteFallback") {
     // No parameters to parse
   } else if (type == "Fuse") {
@@ -295,6 +301,71 @@ std::vector<std::string> SequenceTokenDecoder::decode(
     results = decoder->decode(results);
   }
   return results;
+}
+
+// WordPiece //////////////////////////////////////////////////////////////////
+
+namespace {
+
+std::string wordpiece_cleanup_string(std::string dirty_input) {
+  struct Replacement {
+    std::string pattern;
+    std::string content;
+  };
+  static const std::vector<Replacement> replacements = {
+      {" .", "."},
+      {" ?", "?"},
+      {" !", "!"},
+      {" ,", ","},
+      {" ' ", "'"},
+      {" n't", "n't"},
+      {" 'm", "'m"},
+      {" do not", " don't"},
+      {" 's", "'s"},
+      {" 've", "'ve"},
+      {" 're", "'re"}};
+
+  std::string result = std::move(dirty_input);
+  for (const auto& r : replacements) {
+    size_t pos = 0;
+    while ((pos = result.find(r.pattern, pos)) != std::string::npos) {
+      result.replace(pos, r.pattern.length(), r.content);
+      pos += r.content.length();
+    }
+  }
+  return result;
+}
+
+} // namespace
+
+WordPieceTokenDecoder::WordPieceTokenDecoder(std::string prefix, bool cleanup)
+    : prefix_(std::move(prefix)), cleanup_(cleanup) {}
+
+std::vector<std::string> WordPieceTokenDecoder::decode(
+    const std::vector<std::string>& tokens) const {
+  if (tokens.empty()) {
+    return {};
+  }
+
+  std::vector<std::string> decoded_tokens = tokens;
+
+  for (size_t i = 1; i < decoded_tokens.size(); ++i) {
+    std::string& token = decoded_tokens[i];
+    if (token.size() >= prefix_.size() &&
+        token.compare(0, prefix_.size(), prefix_) == 0) {
+      token = token.substr(prefix_.size());
+    } else {
+      token = " " + token;
+    }
+  }
+
+  if (cleanup_) {
+    for (auto& token : decoded_tokens) {
+      token = wordpiece_cleanup_string(std::move(token));
+    }
+  }
+
+  return decoded_tokens;
 }
 
 } // end  namespace tokenizers
