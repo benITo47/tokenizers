@@ -68,6 +68,13 @@ Normalizer::Ptr NormalizerConfig::create() const {
         [](const NormalizerConfig& cfg) { return cfg.create(); });
     return Normalizer::Ptr(new SequenceNormalizer(norms));
   }
+  if (type == "BertNormalizer") {
+    return Normalizer::Ptr(new BertNormalizer(
+        clean_text.value_or(true),
+        handle_chinese_chars.value_or(true),
+        lowercase.value_or(true),
+        strip_accents));
+  }
   if (type == "NFC") {
     return Normalizer::Ptr(new NFCNormalizer());
   }
@@ -86,7 +93,6 @@ NormalizerConfig& NormalizerConfig::parse_json(const json& json_config) {
       // literal strings (same as Rust's regex::escape)
       pattern = IRegex::escape(literal);
     }
-
     content = json_config.at("content");
   } else if (type == "Prepend") {
     prepend = json_config.at("prepend");
@@ -100,13 +106,27 @@ NormalizerConfig& NormalizerConfig::parse_json(const json& json_config) {
     TK_LOG(
         Info,
         "Using NFC normalizer. Please notice that our implementation may not handle all edge cases.");
+  } else if (type == "BertNormalizer") {
+    if (json_config.contains("clean_text")) {
+      clean_text = json_config.at("clean_text");
+    }
+    if (json_config.contains("handle_chinese_chars")) {
+      handle_chinese_chars = json_config.at("handle_chinese_chars");
+    }
+    if (json_config.contains("lowercase")) {
+      lowercase = json_config.at("lowercase");
+    }
+    if (json_config.contains("strip_accents")) {
+      strip_accents = json_config.at("strip_accents");
+    }
   } else {
     throw std::runtime_error("Unsupported Normalizer type: " + type);
   }
   return *this;
 }
 
-// ReplaceNormalizer ///////////////////////////////////////////////////////////
+// ReplaceNormalizer
+// ///////////////////////////////////////////////////////////
 
 std::unique_ptr<IRegex> ReplaceNormalizer::create_regex_(
     const std::string& pattern) {
@@ -136,8 +156,8 @@ std::string ReplaceNormalizer::normalize(const std::string& input) const {
   return result;
 }
 
-
-// PrependNormalizer ///////////////////////////////////////////////////////////
+// PrependNormalizer
+// ///////////////////////////////////////////////////////////
 
 std::string PrependNormalizer::normalize(const std::string& input) const {
   if (input.empty()) {
@@ -146,7 +166,8 @@ std::string PrependNormalizer::normalize(const std::string& input) const {
   return prepend_ + input;
 }
 
-// SequenceNormalizer //////////////////////////////////////////////////////////
+// SequenceNormalizer
+// //////////////////////////////////////////////////////////
 
 SequenceNormalizer::SequenceNormalizer(std::vector<Normalizer::Ptr> normalizers)
     : normalizers_(std::move(normalizers)) {}
@@ -159,7 +180,8 @@ std::string SequenceNormalizer::normalize(const std::string& input) const {
   return result;
 }
 
-// NFCNormalizer ///////////////////////////////////////////////////////////////
+// NFCNormalizer
+// ///////////////////////////////////////////////////////////////
 
 std::string NFCNormalizer::normalize(const std::string& input) const {
   // Convert UTF-8 string to codepoints
@@ -172,6 +194,102 @@ std::string NFCNormalizer::normalize(const std::string& input) const {
   std::string result;
   for (uint32_t cpt : normalized_cpts) {
     result += unicode_cpt_to_utf8(cpt);
+  }
+
+  return result;
+}
+
+// BertNormalizer
+// ///////////////////////////////////////////////////////////////
+
+namespace {
+
+bool is_bert_whitespace(uint32_t c) {
+  switch (c) {
+    case '\t':
+    case '\n':
+    case '\r':
+      return true;
+  }
+  return unicode_cpt_flags(c).is_whitespace;
+}
+
+bool is_bert_control(uint32_t c) {
+  switch (c) {
+    case '\t':
+    case '\n':
+    case '\r':
+      return false;
+  }
+  return unicode_cpt_flags(c).is_control;
+}
+
+bool is_chinese_char(uint32_t c) {
+  return (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF) ||
+      (c >= 0x20000 && c <= 0x2A6DF) || (c >= 0x2A700 && c <= 0x2B73F) ||
+      (c >= 0x2B740 && c <= 0x2B81F) || (c >= 0x2B920 && c <= 0x2CEAF) ||
+      (c >= 0xF900 && c <= 0xFAFF) || (c >= 0x2F800 && c <= 0x2FA1F);
+}
+
+} // namespace
+
+std::string BertNormalizer::normalize(const std::string& input) const {
+  std::vector<uint32_t> cpts = unicode_cpts_from_utf8(input);
+
+  if (clean_text_) {
+    std::vector<uint32_t> cleaned;
+    cleaned.reserve(cpts.size());
+    for (uint32_t cp : cpts) {
+      if (cp == 0 || cp == 0xfffd || is_bert_control(cp)) {
+        continue;
+      }
+      if (is_bert_whitespace(cp)) {
+        cleaned.push_back(' ');
+      } else {
+        cleaned.push_back(cp);
+      }
+    }
+    cpts = std::move(cleaned);
+  }
+
+  if (handle_chinese_chars_) {
+    std::vector<uint32_t> handled;
+    handled.reserve(cpts.size() * 3);
+    for (uint32_t cp : cpts) {
+      if (is_chinese_char(cp)) {
+        handled.push_back(' ');
+        handled.push_back(cp);
+        handled.push_back(' ');
+      } else {
+        handled.push_back(cp);
+      }
+    }
+    cpts = std::move(handled);
+  }
+
+  const bool do_strip =
+      strip_accents_.has_value() ? *strip_accents_ : lowercase_;
+  if (do_strip) {
+    cpts = unicode_cpts_normalize_nfd(cpts);
+    std::vector<uint32_t> stripped;
+    stripped.reserve(cpts.size());
+    for (uint32_t cp : cpts) {
+      if (!unicode_cpt_flags(cp).is_accent_mark) {
+        stripped.push_back(cp);
+      }
+    }
+    cpts = std::move(stripped);
+  }
+
+  if (lowercase_) {
+    for (auto& cp : cpts) {
+      cp = unicode_tolower(cp);
+    }
+  }
+
+  std::string result;
+  for (uint32_t cp : cpts) {
+    result += unicode_cpt_to_utf8(cp);
   }
 
   return result;

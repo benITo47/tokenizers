@@ -108,6 +108,14 @@ class NormalizerConfig {
    */
   NORMALIZER_CONFIG_MEMBER(std::string, prepend)
 
+  /**
+   * Used by: BertNormalizer
+   */
+  NORMALIZER_CONFIG_MEMBER(bool, clean_text)
+  NORMALIZER_CONFIG_MEMBER(bool, handle_chinese_chars)
+  NORMALIZER_CONFIG_MEMBER(bool, lowercase)
+  NORMALIZER_CONFIG_MEMBER(bool, strip_accents)
+
   /*----------------*/
   /* Public methods */
   /*----------------*/
@@ -210,5 +218,40 @@ class NFCNormalizer : public Normalizer {
   std::string normalize(const std::string& input) const override;
 
 }; // end class NFCNormalizer
+
+// -- Bert ---------------------------------------------------------------------
+// Used for BERT-style normalization (cleaning, lowercasing, accent removal)
+// CITE:
+// https://github.com/huggingface/tokenizers/blob/main/tokenizers/src/normalizers/bert.rs
+
+class BertNormalizer : public Normalizer {
+ public:
+  /**
+   * @param clean_text: Whether to clean the text (remove control chars, etc.)
+   * @param handle_chinese_chars: Whether to put spaces around Chinese
+   * characters
+   * @param lowercase: Whether to lowercase the input
+   * @param strip_accents: Whether to strip accents (optional, usually follows
+   * lowercase)
+   */
+  explicit BertNormalizer(
+      bool clean_text,
+      bool handle_chinese_chars,
+      bool lowercase,
+      std::optional<bool> strip_accents)
+      : clean_text_(clean_text),
+        handle_chinese_chars_(handle_chinese_chars),
+        lowercase_(lowercase),
+        strip_accents_(strip_accents) {}
+
+  /** Perform BERT normalization steps */
+  std::string normalize(const std::string& input) const override;
+
+ protected:
+  const bool clean_text_;
+  const bool handle_chinese_chars_;
+  const bool lowercase_;
+  const std::optional<bool> strip_accents_;
+};
 
 } // namespace tokenizers
