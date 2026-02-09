@@ -53,11 +53,11 @@ class PreTokenizer {
 // -- Factory ------------------------------------------------------------------
 
 // Helper macro to standardize addition of config member fields
-#define CONFIG_MEMBER(type, name)            \
-  std::optional<type> name;                  \
-  PreTokenizerConfig& set_##name(type arg) { \
-    this->name = std::move(arg);             \
-    return *this;                            \
+#define PRETOKENIZER_CONFIG_MEMBER(type, name) \
+  std::optional<type> name;                    \
+  PreTokenizerConfig& set_##name(type arg) {   \
+    this->name = std::move(arg);               \
+    return *this;                              \
   }
 
 /**
@@ -92,37 +92,38 @@ class PreTokenizerConfig {
   /**
    * Used by: RegexPreTokenizer, ByteLevelPreTokenizer
    */
-  CONFIG_MEMBER(std::string, pattern)
+  PRETOKENIZER_CONFIG_MEMBER(std::string, pattern)
 
   /**
    * Used by: DigitsPreTokenizer
    */
-  CONFIG_MEMBER(bool, individual_digits)
+  PRETOKENIZER_CONFIG_MEMBER(bool, individual_digits)
 
   /**
    * Used by: ByteLevelPreTokenizer
    */
-  CONFIG_MEMBER(bool, add_prefix_space)
+  PRETOKENIZER_CONFIG_MEMBER(bool, add_prefix_space)
 
   /**
    * Used by RegexPreTokenizer
    */
-  CONFIG_MEMBER(bool, is_delimiter)
+  PRETOKENIZER_CONFIG_MEMBER(bool, is_delimiter)
 
   /**
    * Used by RegexPreTokenizer - Split behavior
    */
-  CONFIG_MEMBER(std::string, behavior)
+  PRETOKENIZER_CONFIG_MEMBER(std::string, behavior)
 
   /**
    * Used by RegexPreTokenizer - Split invert flag
    */
-  CONFIG_MEMBER(bool, invert)
+  PRETOKENIZER_CONFIG_MEMBER(bool, invert)
 
   /**
    * Used by: SequencePreTokenizer
    */
-  CONFIG_MEMBER(std::vector<PreTokenizerConfig>, pretokenizers)
+  using Configs = std::vector<PreTokenizerConfig>;
+  PRETOKENIZER_CONFIG_MEMBER(Configs, pretokenizers)
 
   /*----------------*/
   /* Public methods */

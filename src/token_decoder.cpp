@@ -36,26 +36,30 @@ TokenDecoder::Ptr TokenDecoderConfig::create() const {
     return TokenDecoder::Ptr(new ByteLevelTokenDecoder());
   } else if (type == "Replace") {
     // Use parsed pattern and content from JSON
-    return TokenDecoder::Ptr(
-        new ReplaceTokenDecoder(replace_pattern, replace_content));
+    return TokenDecoder::Ptr(new ReplaceTokenDecoder(
+        replace_pattern.value_or(""), replace_content.value_or("")));
   } else if (type == "ByteFallback") {
     return TokenDecoder::Ptr(new ByteFallbackTokenDecoder());
   } else if (type == "Fuse") {
     return TokenDecoder::Ptr(new FuseTokenDecoder());
   } else if (type == "Strip") {
     // Use parsed content, start, and stop from JSON
-    return TokenDecoder::Ptr(
-        new StripTokenDecoder(strip_content, strip_start, strip_stop));
+    return TokenDecoder::Ptr(new StripTokenDecoder(
+        strip_content.value_or(""),
+        strip_start.value_or(0),
+        strip_stop.value_or(0)));
   } else if (type == "WordPiece") {
-    return TokenDecoder::Ptr(
-        new WordPieceTokenDecoder(wordpiece_prefix, wordpiece_cleanup));
+    return TokenDecoder::Ptr(new WordPieceTokenDecoder(
+        wordpiece_prefix.value_or("##"), wordpiece_cleanup.value_or(true)));
   } else if (type == "Sequence") {
     // Parse the decoders array from JSON and create sub-decoders
     std::vector<TokenDecoder::Ptr> decoders;
-    for (const auto& decoder_json : sequence_decoders) {
-      TokenDecoderConfig sub_config;
-      sub_config.parse_json(decoder_json);
-      decoders.push_back(sub_config.create());
+    if (sequence_decoders) {
+      for (const auto& decoder_json : *sequence_decoders) {
+        TokenDecoderConfig sub_config;
+        sub_config.parse_json(decoder_json);
+        decoders.push_back(sub_config.create());
+      }
     }
     return TokenDecoder::Ptr(new SequenceTokenDecoder(std::move(decoders)));
   }
@@ -70,13 +74,13 @@ TokenDecoderConfig& TokenDecoderConfig::parse_json(const json& json_config) {
     // Parse pattern and content for Replace decoder
     if (json_config.contains("pattern") && json_config.contains("content")) {
       if (json_config["pattern"].contains("String")) {
-        replace_pattern = json_config["pattern"]["String"];
+        set_replace_pattern(json_config["pattern"]["String"]);
       }
-      replace_content = json_config["content"];
+      set_replace_content(json_config["content"]);
     }
   } else if (type == "WordPiece") {
-    wordpiece_prefix = json_config.value("prefix", "##");
-    wordpiece_cleanup = json_config.value("cleanup", true);
+    set_wordpiece_prefix(json_config.value("prefix", "##"));
+    set_wordpiece_cleanup(json_config.value("cleanup", true));
   } else if (type == "ByteFallback") {
     // No parameters to parse
   } else if (type == "Fuse") {
@@ -84,16 +88,20 @@ TokenDecoderConfig& TokenDecoderConfig::parse_json(const json& json_config) {
   } else if (type == "Strip") {
     // Parse content, start, and stop for Strip decoder
     if (json_config.contains("content")) {
-      strip_content = json_config["content"];
+      set_strip_content(json_config["content"]);
     } else {
       throw std::runtime_error("Strip decoder 'content' is required.");
     }
-    strip_start = json_config.value("start", 0);
-    strip_stop = json_config.value("stop", 0);
+    set_strip_start(json_config.value("start", 0));
+    set_strip_stop(json_config.value("stop", 0));
   } else if (type == "Sequence") {
     // Parse decoders array for Sequence decoder
     if (json_config.contains("decoders")) {
-      sequence_decoders = json_config["decoders"];
+      std::vector<json> decoders;
+      for (const auto& d : json_config["decoders"]) {
+        decoders.push_back(d);
+      }
+      set_sequence_decoders(std::move(decoders));
     }
   } else {
     throw std::runtime_error("Unsupported TokenDecoder type: " + type);

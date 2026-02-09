@@ -60,6 +60,7 @@ class PostProcessor {
 
 // Helper macro to standardize addition of config member fields
 #define POST_PROCESSOR_CONFIG_MEMBER(type, name) \
+  std::optional<type> name;                      \
   PostProcessorConfig& set_##name(type arg) {    \
     this->name = std::move(arg);                 \
     return *this;                                \
@@ -101,25 +102,15 @@ class PostProcessorConfig {
   POST_PROCESSOR_CONFIG_MEMBER(Template, pair)
   POST_PROCESSOR_CONFIG_MEMBER(SpecialTokenMap, special_tokens)
 
-  Template single;
-  Template pair;
-  SpecialTokenMap special_tokens;
-
   // Bert / Roberta (unused params in no-op, but kept for parsing logic)
   POST_PROCESSOR_CONFIG_MEMBER(StringIdPair, sep)
   POST_PROCESSOR_CONFIG_MEMBER(StringIdPair, cls)
   POST_PROCESSOR_CONFIG_MEMBER(bool, trim_offsets)
   POST_PROCESSOR_CONFIG_MEMBER(bool, add_prefix_space)
 
-  StringIdPair sep;
-  StringIdPair cls;
-  bool trim_offsets = true;
-  bool add_prefix_space = true;
-
   // Sequence
-  POST_PROCESSOR_CONFIG_MEMBER(std::vector<PostProcessorConfig>, processors)
-
-  std::vector<PostProcessorConfig> processors;
+  using Configs = std::vector<PostProcessorConfig>;
+  POST_PROCESSOR_CONFIG_MEMBER(Configs, processors)
 
   explicit PostProcessorConfig(std::string type = "");
 

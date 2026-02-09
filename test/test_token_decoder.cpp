@@ -188,7 +188,7 @@ TEST(TokenDecoderConfigTest, TestSequenceConfig) {
   decoder_config.parse_json(config);
 
   EXPECT_EQ(decoder_config.type, "Sequence");
-  EXPECT_EQ(decoder_config.sequence_decoders.size(), 3);
+  EXPECT_EQ(decoder_config.sequence_decoders->size(), 3);
 
   auto decoder = decoder_config.create();
   EXPECT_EQ(decoder->decode(std::vector<std::string>{"_Hello"})[0], " Hello");

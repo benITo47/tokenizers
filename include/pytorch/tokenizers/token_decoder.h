@@ -57,6 +57,7 @@ class TokenDecoder {
 
 // Helper macro to standardize addition of config member fields
 #define TOKEN_DECODER_CONFIG_MEMBER(type, name) \
+  std::optional<type> name;                     \
   TokenDecoderConfig& set_##name(type arg) {    \
     this->name = std::move(arg);                \
     return *this;                               \
@@ -76,45 +77,37 @@ class TokenDecoderConfig {
   // Parameters for Replace decoder
   TOKEN_DECODER_CONFIG_MEMBER(std::string, replace_pattern)
   TOKEN_DECODER_CONFIG_MEMBER(std::string, replace_content)
-  std::string replace_pattern;
-  std::string replace_content;
 
   // Parameters for Sequence decoder
   TOKEN_DECODER_CONFIG_MEMBER(std::vector<nlohmann::json>, sequence_decoders)
-  std::vector<nlohmann::json> sequence_decoders;
 
   // Parameters for Strip decoder
   TOKEN_DECODER_CONFIG_MEMBER(std::string, strip_content)
   TOKEN_DECODER_CONFIG_MEMBER(size_t, strip_start)
   TOKEN_DECODER_CONFIG_MEMBER(size_t, strip_stop)
-  std::string strip_content;
-  size_t strip_start;
-  size_t strip_stop;
 
   // Parameters for WordPiece decoder
   TOKEN_DECODER_CONFIG_MEMBER(std::string, wordpiece_prefix)
   TOKEN_DECODER_CONFIG_MEMBER(bool, wordpiece_cleanup)
-  std::string wordpiece_prefix = "##";
-  bool wordpiece_cleanup = true;
 
-/*----------------*/
-/* Public methods */
-/*----------------*/
+  /*----------------*/
+  /* Public methods */
+  /*----------------*/
 
-/**
- * Construct with the type
- */
-explicit TokenDecoderConfig(std::string type = "");
+  /**
+   * Construct with the type
+   */
+  explicit TokenDecoderConfig(std::string type = "");
 
-/**
- * Construct the pre tokenizer instance from the member data
- */
-TokenDecoder::Ptr create() const;
+  /**
+   * Construct the pre tokenizer instance from the member data
+   */
+  TokenDecoder::Ptr create() const;
 
-/**
- * Populate from a json config file
- */
-TokenDecoderConfig& parse_json(const nlohmann::json& json_config);
+  /**
+   * Populate from a json config file
+   */
+  TokenDecoderConfig& parse_json(const nlohmann::json& json_config);
 }; // end class TokenDecoderConfig
 
 // -- ByteLevel ----------------------------------------------------------------
@@ -124,8 +117,8 @@ TokenDecoderConfig& parse_json(const nlohmann::json& json_config);
 
 class ByteLevelTokenDecoder : public TokenDecoder {
  public:
-std::vector<std::string> decode(
-    const std::vector<std::string>& tokens) const override;
+  std::vector<std::string> decode(
+      const std::vector<std::string>& tokens) const override;
 
 }; // end class ByteLevelTokenDecoder
 
@@ -134,15 +127,15 @@ std::vector<std::string> decode(
 
 class ReplaceTokenDecoder : public TokenDecoder {
  public:
-explicit ReplaceTokenDecoder(
-    const std::string& pattern,
-    const std::string& content);
-std::vector<std::string> decode(
-    const std::vector<std::string>& tokens) const override;
+  explicit ReplaceTokenDecoder(
+      const std::string& pattern,
+      const std::string& content);
+  std::vector<std::string> decode(
+      const std::vector<std::string>& tokens) const override;
 
  private:
-std::string pattern_;
-std::string content_;
+  std::string pattern_;
+  std::string content_;
 }; // end class ReplaceTokenDecoder
 
 // -- ByteFallback -------------------------------------------------------------
@@ -150,8 +143,8 @@ std::string content_;
 
 class ByteFallbackTokenDecoder : public TokenDecoder {
  public:
-std::vector<std::string> decode(
-    const std::vector<std::string>& tokens) const override;
+  std::vector<std::string> decode(
+      const std::vector<std::string>& tokens) const override;
 
 }; // end class ByteFallbackTokenDecoder
 
@@ -160,8 +153,8 @@ std::vector<std::string> decode(
 
 class FuseTokenDecoder : public TokenDecoder {
  public:
-std::vector<std::string> decode(
-    const std::vector<std::string>& tokens) const override;
+  std::vector<std::string> decode(
+      const std::vector<std::string>& tokens) const override;
 
 }; // end class FuseTokenDecoder
 
@@ -178,8 +171,9 @@ class StripTokenDecoder : public TokenDecoder {
       const std::vector<std::string>& tokens) const override;
 
  private:
-  uint32_t content_;size_t start_;
-size_t stop_;
+  uint32_t content_;
+  size_t start_;
+  size_t stop_;
 }; // end class StripTokenDecoder
 
 // -- WordPiece ----------------------------------------------------------------

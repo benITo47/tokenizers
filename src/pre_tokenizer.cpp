@@ -45,7 +45,7 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
     }
 
     // Validate behavior parameter, if missing set to default "Removed"
-    std::string behavior_str = behavior ? *behavior : "Removed";
+    std::string behavior_str = behavior.value_or("Removed");
     if (behavior_str != "MergedWithPrevious" && behavior_str != "Isolated" &&
         behavior_str != "Removed") {
       throw std::runtime_error(
@@ -54,8 +54,8 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
     }
 
     // Validate invert parameter
-    const bool invert_flag = invert ? *invert : false;
-    const bool delimiter_flag = is_delimiter ? *is_delimiter : false;
+    const bool invert_flag = invert.value_or(false);
+    const bool delimiter_flag = is_delimiter.value_or(false);
     if (invert_flag && delimiter_flag) {
       throw std::runtime_error(
           "invert=true is not supported for Split PreTokenizer with a String pattern.");
@@ -65,23 +65,12 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
         new RegexPreTokenizer(*pattern, delimiter_flag, behavior_str));
   }
   if (type == "Digits") {
-    if (individual_digits) {
-      return PreTokenizer::Ptr(new DigitsPreTokenizer(*individual_digits));
-    }
-    return PreTokenizer::Ptr(new DigitsPreTokenizer());
+    return PreTokenizer::Ptr(
+        new DigitsPreTokenizer(individual_digits.value_or(false)));
   }
   if (type == "ByteLevel") {
-    if (add_prefix_space && pattern) {
-      return PreTokenizer::Ptr(
-          new ByteLevelPreTokenizer(*add_prefix_space, *pattern));
-    }
-    if (add_prefix_space) {
-      return PreTokenizer::Ptr(new ByteLevelPreTokenizer(*add_prefix_space));
-    }
-    if (pattern) {
-      return PreTokenizer::Ptr(new ByteLevelPreTokenizer(*pattern));
-    }
-    return PreTokenizer::Ptr(new ByteLevelPreTokenizer());
+    return PreTokenizer::Ptr(new ByteLevelPreTokenizer(
+        add_prefix_space.value_or(true), pattern.value_or("")));
   }
   if (type == "Sequence") {
     if (!pretokenizers || pretokenizers->empty()) {
@@ -89,11 +78,9 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
           "Missing pretokenizers for PreTokenizer of type Sequence");
     }
     std::vector<PreTokenizer::Ptr> pretoks;
-    std::transform(
-        pretokenizers->begin(),
-        pretokenizers->end(),
-        std::back_inserter(pretoks),
-        [](const PreTokenizerConfig& cfg) { return cfg.create(); });
+    for (const auto& cfg : *pretokenizers) {
+      pretoks.push_back(cfg.create());
+    }
     return PreTokenizer::Ptr(new SequencePreTokenizer(pretoks));
   }
   if (type == "BertPreTokenizer") {
@@ -106,45 +93,40 @@ PreTokenizerConfig& PreTokenizerConfig::parse_json(const json& json_config) {
   type = json_config.at("type");
   if (type == "Split") {
     try {
-      pattern = json_config.at("pattern").at("Regex");
-      is_delimiter = false;
+      set_pattern(json_config.at("pattern").at("Regex"));
+      set_is_delimiter(false);
     } catch (json::out_of_range&) {
       // "Regex" is not there, check "String", which is a delimiter
       std::string delimiter = json_config.at("pattern").at("String");
       // For string patterns, escape regex special characters to treat them as
       // literal strings (same as Rust's regex::escape)
-      pattern = IRegex::escape(delimiter);
-      is_delimiter = true;
+      set_pattern(IRegex::escape(delimiter));
+      set_is_delimiter(true);
     }
 
     // Parse behavior and invert fields
-    try {
-      behavior = json_config.at("behavior");
-    } catch (json::out_of_range&) {
-      // behavior is optional, default to empty string
+    if (json_config.contains("behavior")) {
+      set_behavior(json_config["behavior"]);
     }
 
-    try {
-      invert = json_config.at("invert");
-    } catch (json::out_of_range&) {
-      // invert is optional, default to false
+    if (json_config.contains("invert")) {
+      set_invert(json_config["invert"]);
     }
   } else if (type == "Digits") {
-    try {
-      individual_digits = json_config.at("individual_digits");
-    } catch (json::out_of_range&) {
+    if (json_config.contains("individual_digits")) {
+      set_individual_digits(json_config["individual_digits"]);
     }
   } else if (type == "ByteLevel") {
-    try {
-      add_prefix_space = json_config.at("add_prefix_space");
-    } catch (json::out_of_range&) {
+    if (json_config.contains("add_prefix_space")) {
+      set_add_prefix_space(json_config["add_prefix_space"]);
     }
     // TODO: trim_offsets, use_regex
   } else if (type == "Sequence") {
-    pretokenizers = std::vector<PreTokenizerConfig>();
+    std::vector<PreTokenizerConfig> cfgs;
     for (const auto& entry : json_config.at("pretokenizers")) {
-      pretokenizers->push_back(PreTokenizerConfig().parse_json(entry));
+      cfgs.push_back(PreTokenizerConfig().parse_json(entry));
     }
+    set_pretokenizers(std::move(cfgs));
   } else if (type == "BertPreTokenizer") {
     // BertPreTokenizer has no additional configuration parameters
   } else {

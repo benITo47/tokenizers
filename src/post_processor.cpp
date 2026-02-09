@@ -143,27 +143,37 @@ std::pair<std::string, uint64_t> parse_pair(const json& val) {
 PostProcessorConfig::PostProcessorConfig(std::string type)
     : type(std::move(type)) {
   // Set defaults for complex types if needed, though mostly handled in parsing
-  sep = {"[SEP]", 102};
-  cls = {"[CLS]", 101};
+  set_sep({"[SEP]", 102});
+  set_cls({"[CLS]", 101});
 }
 
 PostProcessor::Ptr PostProcessorConfig::create() const {
   if (type == "TemplateProcessing") {
-    return std::make_shared<TemplateProcessing>(single, pair, special_tokens);
+    return std::make_shared<TemplateProcessing>(
+        single.value_or(Template()),
+        pair.value_or(Template()),
+        special_tokens.value_or(SpecialTokenMap()));
   } else if (type == "Sequence") {
     std::vector<PostProcessor::Ptr> ptrs;
-    for (const auto& cfg : processors) {
-      ptrs.push_back(cfg.create());
+    if (processors) {
+      for (const auto& cfg : *processors) {
+        ptrs.push_back(cfg.create());
+      }
     }
     return std::make_shared<Sequence>(std::move(ptrs));
   } else if (type == "ByteLevel") {
     // Return no-op sequence
     return std::make_shared<Sequence>(std::vector<PostProcessor::Ptr>{});
   } else if (type == "BertProcessing") {
-    return std::make_shared<BertProcessing>(sep, cls);
+    return std::make_shared<BertProcessing>(
+        sep.value_or(StringIdPair{"[SEP]", 102}),
+        cls.value_or(StringIdPair{"[CLS]", 101}));
   } else if (type == "RobertaProcessing") {
     return std::make_shared<RobertaProcessing>(
-        sep, cls, trim_offsets, add_prefix_space);
+        sep.value_or(StringIdPair{"</s>", 2}),
+        cls.value_or(StringIdPair{"<s>", 0}),
+        trim_offsets.value_or(true),
+        add_prefix_space.value_or(true));
   }
 
   throw std::runtime_error("Unsupported PostProcessor type: " + type);
@@ -175,42 +185,46 @@ PostProcessorConfig& PostProcessorConfig::parse_json(const json& j) {
   }
 
   if (type == "TemplateProcessing") {
-    single = j.contains("single") ? parse_template(j["single"])
-                                  : parse_template("$0");
-    pair = j.contains("pair") ? parse_template(j["pair"])
-                              : parse_template("$A:0 $B:1");
+    set_single(
+        j.contains("single") ? parse_template(j["single"])
+                             : parse_template("$0"));
+    set_pair(
+        j.contains("pair") ? parse_template(j["pair"])
+                           : parse_template("$A:0 $B:1"));
     if (j.contains("special_tokens")) {
-      special_tokens = parse_special_tokens(j["special_tokens"]);
+      set_special_tokens(parse_special_tokens(j["special_tokens"]));
     }
   } else if (type == "Sequence") {
     if (j.contains("processors")) {
+      std::vector<PostProcessorConfig> cfgs;
       for (const auto& item : j["processors"]) {
-        processors.push_back(PostProcessorConfig().parse_json(item));
+        cfgs.push_back(PostProcessorConfig().parse_json(item));
       }
+      set_processors(std::move(cfgs));
     }
   } else if (type == "BertProcessing") {
     if (j.contains("sep")) {
-      sep = parse_pair(j["sep"]);
+      set_sep(parse_pair(j["sep"]));
     }
     if (j.contains("cls")) {
-      cls = parse_pair(j["cls"]);
+      set_cls(parse_pair(j["cls"]));
     }
   } else if (type == "RobertaProcessing") {
     if (j.contains("sep")) {
-      sep = parse_pair(j["sep"]);
+      set_sep(parse_pair(j["sep"]));
     } else {
-      sep = {"</s>", 2};
+      set_sep({"</s>", 2});
     }
     if (j.contains("cls")) {
-      cls = parse_pair(j["cls"]);
+      set_cls(parse_pair(j["cls"]));
     } else {
-      cls = {"<s>", 0};
+      set_cls({"<s>", 0});
     }
     if (j.contains("trim_offsets")) {
-      trim_offsets = j["trim_offsets"];
+      set_trim_offsets(j.value("trim_offsets", true));
     }
     if (j.contains("add_prefix_space")) {
-      add_prefix_space = j["add_prefix_space"];
+      set_add_prefix_space(j.value("add_prefix_space", true));
     }
   }
 
