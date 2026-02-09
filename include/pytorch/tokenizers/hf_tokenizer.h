@@ -14,20 +14,23 @@
 
 // Standard
 #include <string>
+#include <memory>
+#include <vector>
 
 // Local
 #include <nlohmann/json.hpp>
-#include <pytorch/tokenizers/bpe_tokenizer_base.h>
 #include <pytorch/tokenizers/error.h>
+#include <pytorch/tokenizers/model.h>
 #include <pytorch/tokenizers/normalizer.h>
 #include <pytorch/tokenizers/post_processor.h>
 #include <pytorch/tokenizers/pre_tokenizer.h>
 #include <pytorch/tokenizers/result.h>
 #include <pytorch/tokenizers/token_decoder.h>
+#include <pytorch/tokenizers/tokenizer.h>
 
 namespace tokenizers {
 
-class HFTokenizer : public detail::BPETokenizerBase {
+class HFTokenizer : public Tokenizer {
  public:
   /*-- Public Interface --*/
 
@@ -47,58 +50,34 @@ class HFTokenizer : public detail::BPETokenizerBase {
       int8_t bos = 0,
       int8_t eos = 0) const override;
 
-  using BPETokenizerBase::decode;
+  Result<std::string> id_to_piece(uint64_t token) const override;
+  Result<uint64_t> piece_to_id(const std::string& text) const override;
+
+  Result<std::string> decode(
+      uint64_t prev_token,
+      uint64_t token,
+      bool skip_special_tokens = false) const override;
 
   Result<std::string> decode(
       const std::vector<uint64_t>& tokens,
       bool skip_special_tokens = false) const;
 
  private:
-  Error _encode(
-      const std::string& input,
-      std::vector<uint64_t>& ret,
-      uint64_t& last_piece_token_len) const override;
-
-  void _decode(const std::string& input, std::string& ret) const override;
-
-  std::vector<std::string> _decode(
-      const std::vector<std::string>& pieces) const;
-
-  Result<std::vector<uint64_t>> byte_pair_encode_(
-      const std::string& piece,
-      const detail::TokenMap& encoder) const override;
-
-  // Override the virtual _byte_pair_merge method to use explicit merges
-  // specified in tokenizer.json. Different from Tiktoken (another user of
-  // BPETokenizerBase, but doesn't use explicit merge rules).
-  std::vector<uint64_t> _byte_pair_merge(
-      const std::string& piece,
-      const detail::TokenMap& ranks,
-      std::function<uint64_t(uint64_t, uint64_t)> func) const override;
-
-  Error parse_special_tokens(const nlohmann::json& parsed_json);
-  Error parse_tokens(const nlohmann::json& parsed_json);
   Error setup_normalizer(const nlohmann::json& parsed_json);
   Error setup_pretokenizer(const nlohmann::json& parsed_json);
   Error setup_postprocessor(const nlohmann::json& parsed_json);
   Error setup_decoder(const nlohmann::json& parsed_json);
-  Error parse_merges(const nlohmann::json& parsed_json);
-  Error setup_special_token_ids(
-      const std::string& path,
+  Error setup_model(
       const nlohmann::json& parsed_json,
-      const std::string& model_config_json,
-      const std::string& special_tokens_map_json);
+      const std::string& model_config_path,
+      const std::string& special_tokens_map_path);
 
   Normalizer::Ptr _normalizer;
   PreTokenizer::Ptr _pretokenizer;
   PostProcessor::Ptr _postprocessor;
   TokenDecoder::Ptr _decoder;
 
-  std::unique_ptr<detail::MergeMap> merge_map_;
-  std::optional<detail::TokenMap>
-      merge_ranks_; // Pre-computed merge ranks for BPE
-  bool byte_fallback_ = false;
-  bool unk_token_is_configured_ = false;
+  Model::Ptr _model;
 };
 
 } // namespace tokenizers
