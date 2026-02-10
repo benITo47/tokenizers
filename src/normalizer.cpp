@@ -61,11 +61,9 @@ Normalizer::Ptr NormalizerConfig::create() const {
           "Missing normalizers for Normalizer of type Sequence");
     }
     std::vector<Normalizer::Ptr> norms;
-    std::transform(
-        normalizers->begin(),
-        normalizers->end(),
-        std::back_inserter(norms),
-        [](const NormalizerConfig& cfg) { return cfg.create(); });
+    for (const auto& cfg : *normalizers) {
+      norms.push_back(cfg.create());
+    }
     return Normalizer::Ptr(new SequenceNormalizer(norms));
   }
   if (type == "BertNormalizer") {
@@ -85,39 +83,44 @@ NormalizerConfig& NormalizerConfig::parse_json(const json& json_config) {
   type = json_config.at("type");
   if (type == "Replace") {
     try {
-      pattern = json_config.at("pattern").at("Regex");
+      set_pattern(json_config.at("pattern").at("Regex"));
     } catch (json::out_of_range&) {
       // "Regex" is not there, check "String", which is a literal string
       std::string literal = json_config.at("pattern").at("String");
       // For string patterns, escape regex special characters to treat them as
       // literal strings (same as Rust's regex::escape)
-      pattern = IRegex::escape(literal);
+      set_pattern(IRegex::escape(literal));
     }
-    content = json_config.at("content");
+    set_content(json_config.at("content"));
   } else if (type == "Prepend") {
-    prepend = json_config.at("prepend");
+    set_prepend(json_config.at("prepend"));
   } else if (type == "Sequence") {
-    normalizers = std::vector<NormalizerConfig>();
+    std::vector<NormalizerConfig> cfgs;
     for (const auto& entry : json_config.at("normalizers")) {
-      normalizers->push_back(NormalizerConfig().parse_json(entry));
+      cfgs.push_back(NormalizerConfig().parse_json(entry));
     }
+    set_normalizers(std::move(cfgs));
   } else if (type == "NFC") {
     // NFC normalizer has no additional configuration parameters
     TK_LOG(
         Info,
         "Using NFC normalizer. Please notice that our implementation may not handle all edge cases.");
   } else if (type == "BertNormalizer") {
-    if (json_config.contains("clean_text")) {
-      clean_text = json_config.at("clean_text");
+    if (json_config.contains("clean_text") &&
+        !json_config.at("clean_text").is_null()) {
+      set_clean_text(json_config.at("clean_text"));
     }
-    if (json_config.contains("handle_chinese_chars")) {
-      handle_chinese_chars = json_config.at("handle_chinese_chars");
+    if (json_config.contains("handle_chinese_chars") &&
+        !json_config.at("handle_chinese_chars").is_null()) {
+      set_handle_chinese_chars(json_config.at("handle_chinese_chars"));
     }
-    if (json_config.contains("lowercase")) {
-      lowercase = json_config.at("lowercase");
+    if (json_config.contains("lowercase") &&
+        !json_config.at("lowercase").is_null()) {
+      set_lowercase(json_config.at("lowercase"));
     }
-    if (json_config.contains("strip_accents")) {
-      strip_accents = json_config.at("strip_accents");
+    if (json_config.contains("strip_accents") &&
+        !json_config.at("strip_accents").is_null()) {
+      set_strip_accents(json_config.at("strip_accents"));
     }
   } else {
     throw std::runtime_error("Unsupported Normalizer type: " + type);

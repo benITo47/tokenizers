@@ -101,7 +101,8 @@ class NormalizerConfig {
   /**
    * Used by: SequenceNormalizer
    */
-  NORMALIZER_CONFIG_MEMBER(std::vector<NormalizerConfig>, normalizers)
+  using Configs = std::vector<NormalizerConfig>;
+  NORMALIZER_CONFIG_MEMBER(Configs, normalizers)
 
   /**
    * Used by: PrependNormalizer

@@ -116,6 +116,8 @@ class ModelConfig {
   MODEL_CONFIG_MEMBER(std::string, unk_token)
   MODEL_CONFIG_MEMBER(std::string, bos_token)
   MODEL_CONFIG_MEMBER(std::string, eos_token)
+  MODEL_CONFIG_MEMBER(std::string, continuing_subword_prefix)
+  MODEL_CONFIG_MEMBER(size_t, max_input_chars_per_word)
 
   // Paths for extra config files (HuggingFace specific)
   MODEL_CONFIG_MEMBER(std::string, model_config_path)

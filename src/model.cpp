@@ -13,8 +13,9 @@
 #include <iostream>
 
 #include <pytorch/tokenizers/bpe_model.h>
-#include <pytorch/tokenizers/map_utils.h>
 #include <pytorch/tokenizers/log.h>
+#include <pytorch/tokenizers/map_utils.h>
+#include <pytorch/tokenizers/wordpiece_model.h>
 
 namespace tokenizers {
 
@@ -29,17 +30,25 @@ std::string extract_token_string(const nlohmann::json& token_json) {
   return "";
 };
 
-void parse_special_tokens(ModelConfig& config, const nlohmann::json& json_config) {
-  if (json_config.contains("added_tokens")) {
-    const auto& added_tokens = json_config.at("added_tokens");
-    std::vector<std::pair<std::string, uint64_t>> sp_pairs;
-    for (const auto& entry : added_tokens) {
-      sp_pairs.emplace_back(
-          entry.at("content").get<std::string>(),
-          entry.at("id").get<uint64_t>());
+Error parse_special_tokens(
+    ModelConfig& config,
+    const nlohmann::json& json_config) {
+  try {
+    if (json_config.contains("added_tokens")) {
+      const auto& added_tokens = json_config.at("added_tokens");
+      std::vector<std::pair<std::string, uint64_t>> sp_pairs;
+      for (const auto& entry : added_tokens) {
+        sp_pairs.emplace_back(
+            entry.at("content").get<std::string>(),
+            entry.at("id").get<uint64_t>());
+      }
+      config.set_special_token_pairs(std::move(sp_pairs));
     }
-    config.set_special_token_pairs(std::move(sp_pairs));
+  } catch (const std::exception& e) {
+    TK_LOG(Info, "Could not parse special tokens: %s", e.what());
+    return Error::LoadFailure;
   }
+  return Error::Ok;
 }
 
 void parse_tokens(ModelConfig& config, const nlohmann::json& model_json) {
@@ -70,6 +79,108 @@ void parse_merges(ModelConfig& config, const nlohmann::json& model_json) {
   }
 }
 
+// Common setup for sequence tokens (BOS, EOS, UNK)
+struct SequenceTokenIds {
+  std::optional<uint64_t> unk_token_id;
+  std::optional<uint64_t> bos_token_id;
+  std::optional<uint64_t> eos_token_id;
+};
+
+SequenceTokenIds resolve_sequence_tokens(
+    const ModelConfig& config,
+    const detail::TokenMap& token_map,
+    const detail::TokenMap& special_token_map) {
+  SequenceTokenIds ids;
+  std::string final_unk = config.unk_token.value_or("");
+  std::string final_bos = config.bos_token.value_or("");
+  std::string final_eos = config.eos_token.value_or("");
+
+  auto check_extra = [&](const std::string& path) {
+    if (path.empty())
+      return;
+    std::ifstream f(path);
+    if (!f)
+      return;
+    try {
+      nlohmann::json j = nlohmann::json::parse(f);
+      if (final_bos.empty()) {
+        if (j.contains("bos_token"))
+          final_bos = extract_token_string(j["bos_token"]);
+        else if (j.contains("cls_token"))
+          final_bos = extract_token_string(j["cls_token"]);
+      }
+      if (final_eos.empty()) {
+        if (j.contains("eos_token"))
+          final_eos = extract_token_string(j["eos_token"]);
+        else if (j.contains("sep_token"))
+          final_eos = extract_token_string(j["sep_token"]);
+      }
+      if (final_unk.empty() && j.contains("unk_token")) {
+        if (!j["unk_token"].is_null()) {
+          final_unk = extract_token_string(j["unk_token"]);
+        }
+      }
+    } catch (...) {
+    }
+  };
+
+  check_extra(config.special_tokens_map_path.value_or(""));
+  check_extra(config.model_config_path.value_or(""));
+
+  // Fallback discovery: search by name
+  if (final_bos.empty() || final_eos.empty()) {
+    std::vector<std::string_view> bos_c, eos_c;
+    // Search special tokens
+    for (size_t i = 0; i < special_token_map.size(); ++i) {
+      const auto& [token, _] = special_token_map.getElement(i);
+      if (final_bos.empty() &&
+          (token.find("bos") != std::string::npos ||
+           token.find("begin") != std::string::npos ||
+           token.find("cls") != std::string::npos))
+        bos_c.push_back(token);
+      if (final_eos.empty() &&
+          (token.find("eos") != std::string::npos ||
+           token.find("end") != std::string::npos ||
+           token.find("sep") != std::string::npos))
+        eos_c.push_back(token);
+    }
+    if (final_bos.empty() && bos_c.size() == 1) {
+      final_bos = std::string(bos_c[0]);
+    }
+    if (final_eos.empty() && eos_c.size() == 1) {
+      final_eos = std::string(eos_c[0]);
+    }
+  }
+
+  // UNK priority list
+  if (final_unk.empty()) {
+    for (const auto& name : {"<unk>", "[UNK]", "<|endoftext|>"}) {
+      if (special_token_map.tryGetInteger(name) ||
+          token_map.tryGetInteger(name)) {
+        final_unk = name;
+        break;
+      }
+    }
+  }
+
+  // Resolve strings to IDs (check both maps)
+  auto resolve = [&](const std::string& s) -> std::optional<uint64_t> {
+    if (s.empty())
+      return std::nullopt;
+    auto id = special_token_map.tryGetInteger(s);
+    if (!id) {
+      id = token_map.tryGetInteger(s);
+    }
+    return id;
+  };
+
+  ids.unk_token_id = resolve(final_unk);
+  ids.bos_token_id = resolve(final_bos);
+  ids.eos_token_id = resolve(final_eos);
+
+  return ids;
+}
+
 } // namespace
 
 ModelConfig& ModelConfig::parse_json(const nlohmann::json& json_config) {
@@ -79,16 +190,28 @@ ModelConfig& ModelConfig::parse_json(const nlohmann::json& json_config) {
       type = model_json.at("type").get<std::string>();
     }
 
-    if (type == "BPE") {
-      parse_tokens(*this, model_json);
-      parse_merges(*this, model_json);
+    // Common vocab parsing
+    parse_tokens(*this, model_json);
 
+    // Common config parsing
+    if (model_json.contains("unk_token") &&
+        !model_json.at("unk_token").is_null()) {
+      set_unk_token(model_json.at("unk_token").get<std::string>());
+    }
+
+    if (type == "BPE") {
+      parse_merges(*this, model_json);
       if (model_json.contains("byte_fallback")) {
         set_byte_fallback(model_json.at("byte_fallback").get<bool>());
       }
-      if (model_json.contains("unk_token") &&
-          !model_json.at("unk_token").is_null()) {
-        set_unk_token(model_json.at("unk_token").get<std::string>());
+    } else if (type == "WordPiece") {
+      if (model_json.contains("continuing_subword_prefix")) {
+        set_continuing_subword_prefix(
+            model_json.at("continuing_subword_prefix").get<std::string>());
+      }
+      if (model_json.contains("max_input_chars_per_word")) {
+        set_max_input_chars_per_word(
+            model_json.at("max_input_chars_per_word").get<size_t>());
       }
     }
   }
@@ -99,122 +222,46 @@ ModelConfig& ModelConfig::parse_json(const nlohmann::json& json_config) {
 }
 
 Model::Ptr ModelConfig::create() const {
+  const auto& raw_token_pairs =
+      token_pairs.value_or(std::vector<std::pair<std::string, uint64_t>>());
+  const auto& raw_special_pairs = special_token_pairs.value_or(
+      std::vector<std::pair<std::string, uint64_t>>());
+
+  // Filter out special tokens from vocab if they were included
+  std::vector<std::pair<std::string, uint64_t>> model_token_pairs;
+  for (const auto& tp : raw_token_pairs) {
+    bool is_special = false;
+    for (const auto& sp : raw_special_pairs) {
+      if (sp.second == tp.second) {
+        is_special = true;
+        break;
+      }
+    }
+    if (!is_special) {
+      model_token_pairs.push_back(tp);
+    }
+  }
+
+  auto token_map_res = detail::build_token_map(std::move(model_token_pairs));
+  auto special_token_map_res = detail::build_token_map(raw_special_pairs);
+
+  if (!token_map_res.ok() || !special_token_map_res.ok()) {
+    return nullptr;
+  }
+
+  auto token_map = std::move(*token_map_res);
+  auto special_token_map = std::move(*special_token_map_res);
+
+  // Resolve sequence tokens
+  auto ids = resolve_sequence_tokens(*this, token_map, special_token_map);
+
   if (type == "BPE") {
-    const auto& raw_token_pairs =
-        token_pairs.value_or(std::vector<std::pair<std::string, uint64_t>>());
-    const auto& raw_special_pairs = special_token_pairs.value_or(
-        std::vector<std::pair<std::string, uint64_t>>());
-
-    // Filter out special tokens from vocab if they were included
-    std::vector<std::pair<std::string, uint64_t>> bpe_token_pairs;
-    for (const auto& tp : raw_token_pairs) {
-      bool is_special = false;
-      for (const auto& sp : raw_special_pairs) {
-        if (sp.second == tp.second) {
-          is_special = true;
-          break;
-        }
-      }
-      if (!is_special) {
-        bpe_token_pairs.push_back(tp);
-      }
-    }
-
-    auto token_map_res = detail::build_token_map(std::move(bpe_token_pairs));
-    auto special_token_map_res = detail::build_token_map(raw_special_pairs);
-
-    if (!token_map_res.ok() || !special_token_map_res.ok()) {
-      return nullptr;
-    }
-
-    auto token_map = std::move(*token_map_res);
-    auto special_token_map = std::move(*special_token_map_res);
-
     // Build special token regex
     std::unique_ptr<IRegex> special_token_regex;
     auto special_token_regex_res =
         detail::build_special_token_regex(special_token_map);
     if (special_token_regex_res.ok()) {
       special_token_regex = std::move(*special_token_regex_res);
-    }
-
-    // Discovery Phase for sequence tokens
-    std::string final_unk = unk_token.value_or("");
-    std::string final_bos = bos_token.value_or("");
-    std::string final_eos = eos_token.value_or("");
-
-    auto check_extra = [&](const std::string& path) {
-      if (path.empty())
-        return;
-      std::ifstream f(path);
-      if (!f)
-        return;
-      try {
-        nlohmann::json j = nlohmann::json::parse(f);
-        if (final_bos.empty() && j.contains("bos_token"))
-          final_bos = extract_token_string(j["bos_token"]);
-        if (final_eos.empty() && j.contains("eos_token"))
-          final_eos = extract_token_string(j["eos_token"]);
-        if (final_unk.empty() && j.contains("unk_token")) {
-          if (!j["unk_token"].is_null()) {
-            final_unk = extract_token_string(j["unk_token"]);
-          }
-        }
-      } catch (...) {
-      }
-    };
-
-    check_extra(special_tokens_map_path.value_or(""));
-    check_extra(model_config_path.value_or(""));
-
-    // Fallback discovery: search by name
-    if (final_bos.empty() || final_eos.empty()) {
-      std::vector<std::string_view> bos_c, eos_c;
-      for (size_t i = 0; i < special_token_map.size(); ++i) {
-        const auto& [token, _] = special_token_map.getElement(i);
-        if (final_bos.empty() &&
-            (token.find("bos") != std::string::npos ||
-             token.find("begin") != std::string::npos))
-          bos_c.push_back(token);
-        if (final_eos.empty() &&
-            (token.find("eos") != std::string::npos ||
-             token.find("end") != std::string::npos))
-          eos_c.push_back(token);
-      }
-      if (final_bos.empty() && bos_c.size() == 1) {
-        final_bos = std::string(bos_c[0]);
-      }
-      if (final_eos.empty() && eos_c.size() == 1) {
-        final_eos = std::string(eos_c[0]);
-      }
-    }
-
-    // UNK priority list
-    if (final_unk.empty()) {
-      for (const auto& name : {"<unk>", "[UNK]", "<|endoftext|>"}) {
-        if (special_token_map.tryGetInteger(name)) {
-          final_unk = name;
-          break;
-        }
-      }
-    }
-
-    // Resolve strings to IDs
-    std::optional<uint64_t> unk_token_id;
-    std::optional<uint64_t> bos_token_id;
-    std::optional<uint64_t> eos_token_id;
-
-    if (!final_unk.empty()) {
-      auto id = special_token_map.tryGetInteger(final_unk);
-      if (id) unk_token_id = *id;
-    }
-    if (!final_bos.empty()) {
-      auto id = special_token_map.tryGetInteger(final_bos);
-      if (id) bos_token_id = *id;
-    }
-    if (!final_eos.empty()) {
-      auto id = special_token_map.tryGetInteger(final_eos);
-      if (id) eos_token_id = *id;
     }
 
     // Build merge ranks from merges
@@ -253,10 +300,23 @@ Model::Ptr ModelConfig::create() const {
         std::move(merge_ranks),
         std::move(special_token_regex),
         byte_fallback.value_or(false),
-        unk_token_id,
-        bos_token_id,
-        eos_token_id);
+        ids.unk_token_id,
+        ids.bos_token_id,
+        ids.eos_token_id);
+
+  } else if (type == "WordPiece") {
+    std::string unk = unk_token.value_or("[UNK]");
+    return std::make_shared<WordPieceModel>(
+        std::move(token_map),
+        std::move(special_token_map),
+        unk,
+        continuing_subword_prefix.value_or("##"),
+        max_input_chars_per_word.value_or(100),
+        ids.unk_token_id,
+        ids.bos_token_id,
+        ids.eos_token_id);
   }
+
   return nullptr;
 }
 
