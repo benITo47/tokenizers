@@ -78,9 +78,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ${_pic_flag})
 file(GLOB tokenizers_source_files ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 set(tokenizers_source_files
     ${CMAKE_CURRENT_SOURCE_DIR}/src/bpe_tokenizer_base.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/bpe_model.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hf_tokenizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/llama2c_tokenizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/model.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/normalizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/padding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/post_processor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pre_tokenizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/re2_regex.cpp
@@ -89,6 +92,8 @@ set(tokenizers_source_files
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tekken.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tiktoken.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/token_decoder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/truncation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wordpiece_model.cpp
 )
 
 file(GLOB unicode_source_files
