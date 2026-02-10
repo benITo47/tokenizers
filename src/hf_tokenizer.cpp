@@ -73,6 +73,8 @@ Error HFTokenizer::load(const std::string& path) {
   TK_CHECK_OK_OR_RETURN_ERROR(setup_pretokenizer(parsed_json));
   TK_CHECK_OK_OR_RETURN_ERROR(setup_postprocessor(parsed_json));
   TK_CHECK_OK_OR_RETURN_ERROR(setup_decoder(parsed_json));
+  TK_CHECK_OK_OR_RETURN_ERROR(setup_truncation(parsed_json));
+  TK_CHECK_OK_OR_RETURN_ERROR(setup_padding(parsed_json));
 
   // Setup Model
   TK_CHECK_OK_OR_RETURN_ERROR(setup_model(
@@ -113,6 +115,21 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
   }
 
   bool add_special = (bos > 0 || eos > 0);
+  
+  if (_truncation) {
+    size_t added = 0;
+    if (_postprocessor) {
+      added = _postprocessor->added_tokens(false); // is_pair=false
+    } else {
+      // If no postprocessor, we effectively add bos + eos
+      if (add_special) {
+          added += (bos > 0 ? 1 : 0);
+          added += (eos > 0 ? 1 : 0);
+      }
+    }
+    tokens = _truncation->truncate(std::move(tokens), added);
+  }
+
   if (_postprocessor) {
     tokens = _postprocessor->process(tokens, add_special);
   } else {
@@ -122,6 +139,10 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
     for (int i = 0; i < eos; ++i) {
       tokens.push_back(eos_tok_);
     }
+  }
+
+  if (_padding) {
+    tokens = _padding->pad(std::move(tokens));
   }
 
   return tokens;
@@ -258,6 +279,34 @@ Error HFTokenizer::setup_decoder(const json& parsed_json) {
     }
   } catch (const std::exception& e) {
     TK_LOG(Error, "Failed to setup decoder: %s", e.what());
+    return Error::LoadFailure;
+  }
+  return Error::Ok;
+}
+
+Error HFTokenizer::setup_truncation(const json& parsed_json) {
+  try {
+    if (parsed_json.contains("truncation") &&
+        !parsed_json.at("truncation").is_null()) {
+      const auto& t_json = parsed_json.at("truncation");
+      _truncation = TruncationConfig().parse_json(t_json).create();
+    }
+  } catch (const std::exception& e) {
+    TK_LOG(Error, "Failed to setup truncation: %s", e.what());
+    return Error::LoadFailure;
+  }
+  return Error::Ok;
+}
+
+Error HFTokenizer::setup_padding(const json& parsed_json) {
+  try {
+    if (parsed_json.contains("padding") &&
+        !parsed_json.at("padding").is_null()) {
+      const auto& padding_json = parsed_json.at("padding");
+      _padding = PaddingConfig().parse_json(padding_json).create();
+    }
+  } catch (const std::exception& e) {
+    TK_LOG(Error, "Failed to setup padding: %s", e.what());
     return Error::LoadFailure;
   }
   return Error::Ok;
