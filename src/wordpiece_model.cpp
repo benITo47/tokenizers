@@ -35,6 +35,11 @@ WordPieceModel::WordPieceModel(
       bos_token_id_(bos_token_id),
       eos_token_id_(eos_token_id) {
   vocab_size_ = token_map_.size() + special_token_map_.size();
+  auto special_token_regex_res =
+      detail::build_special_token_regex(special_token_map_);
+  if (special_token_regex_res.ok()) {
+    special_token_regex_ = std::move(*special_token_regex_res);
+  }
   initialized_ = true;
 }
 
@@ -171,6 +176,26 @@ Result<uint64_t> WordPieceModel::piece_to_id(const std::string& token) const {
 
 bool WordPieceModel::is_special_token(uint64_t token) const {
   return special_token_map_.tryGetString(token).has_value();
+}
+
+std::pair<std::optional<std::string>, std::string>
+WordPieceModel::split_with_allowed_special_token(
+    const std::string& input,
+    size_t offset) const {
+  if (!special_token_regex_) {
+    return {std::nullopt, input.substr(offset)};
+  }
+
+  auto matches = special_token_regex_->find_all(input.substr(offset));
+
+  for (const auto& m : matches) {
+    std::string matched_text = input.substr(offset + m.start, m.end - m.start);
+    if (special_token_map_.tryGetInteger(matched_text).has_value()) {
+      return {matched_text, input.substr(offset, m.start)};
+    }
+  }
+
+  return {std::nullopt, input.substr(offset)};
 }
 
 } // namespace tokenizers

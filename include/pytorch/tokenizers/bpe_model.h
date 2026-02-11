@@ -53,6 +53,10 @@ class BPEModel : public Model {
     return initialized_;
   }
 
+  std::pair<std::optional<std::string>, std::string>
+  split_with_allowed_special_token(const std::string& input, size_t offset)
+      const override;
+
   uint64_t bos_token_id() const override {
     return bos_token_id_.value_or(0);
   }
@@ -64,10 +68,6 @@ class BPEModel : public Model {
  private:
   Result<std::pair<std::vector<uint64_t>, uint64_t>> encode_with_special_token(
       const std::string& text) const;
-
-  std::pair<std::optional<std::string>, std::string>
-  split_with_allowed_special_token(const std::string& input, size_t offset)
-      const;
 
   Result<std::vector<uint64_t>> byte_pair_encode(const std::string& piece) const;
 

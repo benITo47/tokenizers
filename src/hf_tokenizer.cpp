@@ -14,6 +14,7 @@
 #include <cinttypes>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -92,44 +93,72 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
     return Error::Uninitialized;
   }
 
-  std::string normalized_input = input;
-  if (_normalizer) {
-    normalized_input = _normalizer->normalize(input);
-  }
-
-  std::vector<std::string> pieces;
-  if (_pretokenizer) {
-    pieces = _pretokenizer->pre_tokenize(normalized_input);
-  } else {
-    pieces.push_back(normalized_input);
-  }
-
   std::vector<uint64_t> tokens;
-  for (const auto& piece : pieces) {
-    auto piece_tokens_result = _model->tokenize(piece);
-    if (!piece_tokens_result.ok()) {
-      return piece_tokens_result.error();
+  std::string current_input = input;
+  size_t offset = 0;
+
+  while (offset < input.size()) {
+    auto [special, sub_input] =
+        _model->split_with_allowed_special_token(input, offset);
+
+    // 1. Process regular text segment
+    if (!sub_input.empty()) {
+      // a. Normalization
+      std::string normalized_segment = sub_input;
+      if (_normalizer) {
+        normalized_segment = _normalizer->normalize(sub_input);
+      }
+
+      // b. Pre-tokenization
+      std::vector<std::string> pieces;
+      if (_pretokenizer) {
+        pieces = _pretokenizer->pre_tokenize(normalized_segment);
+      } else {
+        pieces.push_back(normalized_segment);
+      }
+
+      // c. Model Tokenize
+      for (const auto& piece : pieces) {
+        auto piece_tokens_result = _model->tokenize(piece);
+        if (!piece_tokens_result.ok()) {
+          return piece_tokens_result.error();
+        }
+        auto piece_tokens = std::move(*piece_tokens_result);
+        tokens.insert(tokens.end(), piece_tokens.begin(), piece_tokens.end());
+      }
     }
-    auto piece_tokens = std::move(*piece_tokens_result);
-    tokens.insert(tokens.end(), piece_tokens.begin(), piece_tokens.end());
+    offset += sub_input.size();
+
+    // 2. Process special token
+    if (special) {
+      auto id_res = _model->piece_to_id(*special);
+      if (!id_res.ok()) {
+        return id_res.error();
+      }
+      tokens.push_back(*id_res);
+      offset += special->size();
+    } else {
+      break;
+    }
   }
 
   bool add_special = (bos > 0 || eos > 0);
-  
+
+  // 4. Truncation
   if (_truncation) {
     size_t added = 0;
     if (_postprocessor) {
       added = _postprocessor->added_tokens(false); // is_pair=false
     } else {
-      // If no postprocessor, we effectively add bos + eos
       if (add_special) {
-          added += (bos > 0 ? 1 : 0);
-          added += (eos > 0 ? 1 : 0);
+        added += (bos > 0 ? 1 : 0);
+        added += (eos > 0 ? 1 : 0);
       }
     }
     tokens = _truncation->truncate(std::move(tokens), added);
   }
 
+  // 5. Post-Processing
   if (_postprocessor) {
     tokens = _postprocessor->process(tokens, add_special);
   } else {
@@ -141,6 +170,7 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
     }
   }
 
+  // 6. Padding
   if (_padding) {
     tokens = _padding->pad(std::move(tokens));
   }

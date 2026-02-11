@@ -57,6 +57,28 @@ TEST(NormalizerTest, PrependNormalizerEmptyInput) {
   EXPECT_EQ(result, expected);
 }
 
+TEST(NormalizerTest, LowercaseNormalizerBasic) {
+  // Test basic lowercasing
+  LowercaseNormalizer normalizer;
+  EXPECT_EQ(normalizer.normalize("HELLO WORLD"), "hello world");
+  EXPECT_EQ(normalizer.normalize("Hello World"), "hello world");
+  EXPECT_EQ(normalizer.normalize("hello world"), "hello world");
+  // Test with accents (should lowercase but NOT strip them, LowercaseNormalizer
+  // only lowercases)
+  EXPECT_EQ(normalizer.normalize("HÉLLO"), "héllo");
+}
+
+TEST(NormalizerTest, NormalizerConfigLowercase) {
+  // Test JSON parsing for Lowercase normalizer
+  nlohmann::json config = {{"type", "Lowercase"}};
+
+  NormalizerConfig norm_config;
+  norm_config.parse_json(config);
+  auto normalizer = norm_config.create();
+
+  EXPECT_EQ(normalizer->normalize("HELLO"), "hello");
+}
+
 TEST(NormalizerTest, NormalizerConfigPrepend) {
   // Test JSON parsing for Prepend normalizer
   nlohmann::json config = {{"type", "Prepend"}, {"prepend", "_"}};

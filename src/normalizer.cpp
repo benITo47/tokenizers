@@ -76,6 +76,9 @@ Normalizer::Ptr NormalizerConfig::create() const {
   if (type == "NFC") {
     return Normalizer::Ptr(new NFCNormalizer());
   }
+  if (type == "Lowercase") {
+    return Normalizer::Ptr(new LowercaseNormalizer());
+  }
   throw std::runtime_error("Unsupported Normalizer type: " + type);
 }
 
@@ -105,6 +108,8 @@ NormalizerConfig& NormalizerConfig::parse_json(const json& json_config) {
     TK_LOG(
         Info,
         "Using NFC normalizer. Please notice that our implementation may not handle all edge cases.");
+  } else if (type == "Lowercase") {
+    // Lowercase normalizer has no additional configuration parameters
   } else if (type == "BertNormalizer") {
     if (json_config.contains("clean_text") &&
         !json_config.at("clean_text").is_null()) {
@@ -196,6 +201,27 @@ std::string NFCNormalizer::normalize(const std::string& input) const {
   // Convert back to UTF-8 string
   std::string result;
   for (uint32_t cpt : normalized_cpts) {
+    result += unicode_cpt_to_utf8(cpt);
+  }
+
+  return result;
+}
+
+// LowercaseNormalizer
+// ///////////////////////////////////////////////////////////////
+
+std::string LowercaseNormalizer::normalize(const std::string& input) const {
+  // Convert UTF-8 string to codepoints
+  auto codepoints = unicode_cpts_from_utf8(input);
+
+  // Lowercase each codepoint
+  for (auto& cp : codepoints) {
+    cp = unicode_tolower(cp);
+  }
+
+  // Convert back to UTF-8 string
+  std::string result;
+  for (uint32_t cpt : codepoints) {
     result += unicode_cpt_to_utf8(cpt);
   }
 
