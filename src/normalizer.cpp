@@ -10,6 +10,7 @@
 // Local
 #include <pytorch/tokenizers/normalizer.h>
 #include <pytorch/tokenizers/regex.h>
+#include <pytorch/tokenizers/unicode-nfc.h>
 
 // Third Party
 #include <unicode.h>
@@ -192,19 +193,8 @@ std::string SequenceNormalizer::normalize(const std::string& input) const {
 // ///////////////////////////////////////////////////////////////
 
 std::string NFCNormalizer::normalize(const std::string& input) const {
-  // Convert UTF-8 string to codepoints
-  auto codepoints = unicode_cpts_from_utf8(input);
-
-  // Apply NFC normalization
-  auto normalized_cpts = unicode_cpts_normalize_nfc(codepoints);
-
-  // Convert back to UTF-8 string
-  std::string result;
-  for (uint32_t cpt : normalized_cpts) {
-    result += unicode_cpt_to_utf8(cpt);
-  }
-
-  return result;
+  // Use our proper NFC normalization implementation
+  return unicode_normalize_nfc_utf8(input);
 }
 
 // LowercaseNormalizer

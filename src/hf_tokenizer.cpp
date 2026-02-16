@@ -79,9 +79,7 @@ Error HFTokenizer::load(const std::string& path) {
 
   // Setup Model
   TK_CHECK_OK_OR_RETURN_ERROR(setup_model(
-      parsed_json,
-      model_config_json_path,
-      special_tokens_map_json_path));
+      parsed_json, model_config_json_path, special_tokens_map_json_path));
 
   initialized_ = true;
   return Error::Ok;
@@ -147,10 +145,10 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
   // 4. Truncation
   if (_truncation) {
     size_t added = 0;
-    if (_postprocessor) {
-      added = _postprocessor->added_tokens(false); // is_pair=false
-    } else {
-      if (add_special) {
+    if (add_special) {
+      if (_postprocessor) {
+        added = _postprocessor->added_tokens(false); // is_pair=false
+      } else {
         added += (bos > 0 ? 1 : 0);
         added += (eos > 0 ? 1 : 0);
       }

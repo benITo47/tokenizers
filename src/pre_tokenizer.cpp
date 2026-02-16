@@ -175,14 +175,9 @@ std::vector<std::string> RegexPreTokenizer::pre_tokenize(
 
   if (!is_delimiter_) {
     // Original behavior: return the matches themselves
-    int match_count = 0;
     for (const auto& match : matches) {
       std::string piece = input.substr(match.start, match.end - match.start);
       results.push_back(piece);
-      if (regex_debug_count <= 3 && match_count < 3) {
-        std::cout << "  Match " << match_count << ": \"" << piece << "\"" << std::endl;
-        match_count++;
-      }
     }
   } else {
     // Delimiter behavior
