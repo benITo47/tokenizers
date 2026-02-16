@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
@@ -69,8 +71,12 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
         new DigitsPreTokenizer(individual_digits.value_or(false)));
   }
   if (type == "ByteLevel") {
+    // Default use_regex to true for backwards compatibility
+    // When use_regex is false, ByteLevel only does byte encoding, no regex split
     return PreTokenizer::Ptr(new ByteLevelPreTokenizer(
-        add_prefix_space.value_or(true), pattern.value_or("")));
+        add_prefix_space.value_or(true),
+        pattern.value_or(""),
+        use_regex.value_or(true)));
   }
   if (type == "Sequence") {
     if (!pretokenizers || pretokenizers->empty()) {
@@ -120,7 +126,10 @@ PreTokenizerConfig& PreTokenizerConfig::parse_json(const json& json_config) {
     if (json_config.contains("add_prefix_space")) {
       set_add_prefix_space(json_config["add_prefix_space"]);
     }
-    // TODO: trim_offsets, use_regex
+    if (json_config.contains("use_regex")) {
+      set_use_regex(json_config["use_regex"]);
+    }
+    // TODO: trim_offsets
   } else if (type == "Sequence") {
     std::vector<PreTokenizerConfig> cfgs;
     for (const auto& entry : json_config.at("pretokenizers")) {
@@ -155,13 +164,25 @@ std::vector<std::string> RegexPreTokenizer::pre_tokenize(
     return {};
   }
 
+  static int regex_debug_count = 0;
+  if (regex_debug_count < 3) {
+    std::cout << "[RegexPreTokenizer] Input: \"" << input.substr(0, 50) << "..." << "\"" << std::endl;
+    regex_debug_count++;
+  }
+
   std::vector<std::string> results;
   auto matches = regex_->find_all(input);
 
   if (!is_delimiter_) {
     // Original behavior: return the matches themselves
+    int match_count = 0;
     for (const auto& match : matches) {
-      results.push_back(input.substr(match.start, match.end - match.start));
+      std::string piece = input.substr(match.start, match.end - match.start);
+      results.push_back(piece);
+      if (regex_debug_count <= 3 && match_count < 3) {
+        std::cout << "  Match " << match_count << ": \"" << piece << "\"" << std::endl;
+        match_count++;
+      }
     }
   } else {
     // Delimiter behavior
@@ -262,12 +283,23 @@ constexpr char GPT2_EXPR[] =
 
 ByteLevelPreTokenizer::ByteLevelPreTokenizer(
     bool add_prefix_space,
-    const std::string& pattern)
+    const std::string& pattern,
+    bool use_regex)
     : pattern_(pattern.empty() ? GPT2_EXPR : pattern),
-      add_prefix_space_(add_prefix_space) {}
+      add_prefix_space_(add_prefix_space),
+      use_regex_(use_regex) {}
 
 std::vector<std::string> ByteLevelPreTokenizer::pre_tokenize(
     const std::string& input) const {
+  // If use_regex is false, skip regex splitting and only apply byte encoding
+  if (!use_regex_) {
+    std::string encoded;
+    for (unsigned char byte : input) {
+      encoded += unicode_byte_to_utf8(byte);
+    }
+    return {encoded};
+  }
+
   // Add the prefix space if configured to do so.
   std::string formatted_input = input;
   if (add_prefix_space_ && !formatted_input.empty() &&
@@ -275,7 +307,11 @@ std::vector<std::string> ByteLevelPreTokenizer::pre_tokenize(
     formatted_input.insert(formatted_input.begin(), ' ');
   }
 
-  return unicode_regex_split(formatted_input, {pattern_});
+  // Split using regex
+  // Note: unicode_regex_split automatically applies byte encoding
+  auto pieces = unicode_regex_split(formatted_input, {pattern_});
+
+  return pieces;
 }
 
 // SequencePreTokenizer
