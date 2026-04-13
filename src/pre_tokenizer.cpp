@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
@@ -45,7 +47,7 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
     }
 
     // Validate behavior parameter, if missing set to default "Removed"
-    std::string behavior_str = behavior ? *behavior : "Removed";
+    std::string behavior_str = behavior.value_or("Removed");
     if (behavior_str != "MergedWithPrevious" && behavior_str != "Isolated" &&
         behavior_str != "Removed") {
       throw std::runtime_error(
@@ -54,8 +56,8 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
     }
 
     // Validate invert parameter
-    const bool invert_flag = invert ? *invert : false;
-    const bool delimiter_flag = is_delimiter ? *is_delimiter : false;
+    const bool invert_flag = invert.value_or(false);
+    const bool delimiter_flag = is_delimiter.value_or(false);
     if (invert_flag && delimiter_flag) {
       throw std::runtime_error(
           "invert=true is not supported for Split PreTokenizer with a String pattern.");
@@ -65,23 +67,16 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
         new RegexPreTokenizer(*pattern, delimiter_flag, behavior_str));
   }
   if (type == "Digits") {
-    if (individual_digits) {
-      return PreTokenizer::Ptr(new DigitsPreTokenizer(*individual_digits));
-    }
-    return PreTokenizer::Ptr(new DigitsPreTokenizer());
+    return PreTokenizer::Ptr(
+        new DigitsPreTokenizer(individual_digits.value_or(false)));
   }
   if (type == "ByteLevel") {
-    if (add_prefix_space && pattern) {
-      return PreTokenizer::Ptr(
-          new ByteLevelPreTokenizer(*add_prefix_space, *pattern));
-    }
-    if (add_prefix_space) {
-      return PreTokenizer::Ptr(new ByteLevelPreTokenizer(*add_prefix_space));
-    }
-    if (pattern) {
-      return PreTokenizer::Ptr(new ByteLevelPreTokenizer(*pattern));
-    }
-    return PreTokenizer::Ptr(new ByteLevelPreTokenizer());
+    // Default use_regex to true for backwards compatibility
+    // When use_regex is false, ByteLevel only does byte encoding, no regex split
+    return PreTokenizer::Ptr(new ByteLevelPreTokenizer(
+        add_prefix_space.value_or(true),
+        pattern.value_or(""),
+        use_regex.value_or(true)));
   }
   if (type == "Sequence") {
     if (!pretokenizers || pretokenizers->empty()) {
@@ -89,12 +84,13 @@ PreTokenizer::Ptr PreTokenizerConfig::create() const {
           "Missing pretokenizers for PreTokenizer of type Sequence");
     }
     std::vector<PreTokenizer::Ptr> pretoks;
-    std::transform(
-        pretokenizers->begin(),
-        pretokenizers->end(),
-        std::back_inserter(pretoks),
-        [](const PreTokenizerConfig& cfg) { return cfg.create(); });
+    for (const auto& cfg : *pretokenizers) {
+      pretoks.push_back(cfg.create());
+    }
     return PreTokenizer::Ptr(new SequencePreTokenizer(pretoks));
+  }
+  if (type == "BertPreTokenizer") {
+    return PreTokenizer::Ptr(new BertPreTokenizer());
   }
   throw std::runtime_error("Unsupported PreTokenizer type: " + type);
 }
@@ -103,52 +99,53 @@ PreTokenizerConfig& PreTokenizerConfig::parse_json(const json& json_config) {
   type = json_config.at("type");
   if (type == "Split") {
     try {
-      pattern = json_config.at("pattern").at("Regex");
-      is_delimiter = false;
+      set_pattern(json_config.at("pattern").at("Regex"));
+      set_is_delimiter(false);
     } catch (json::out_of_range&) {
       // "Regex" is not there, check "String", which is a delimiter
       std::string delimiter = json_config.at("pattern").at("String");
       // For string patterns, escape regex special characters to treat them as
       // literal strings (same as Rust's regex::escape)
-      pattern = IRegex::escape(delimiter);
-      is_delimiter = true;
+      set_pattern(IRegex::escape(delimiter));
+      set_is_delimiter(true);
     }
 
     // Parse behavior and invert fields
-    try {
-      behavior = json_config.at("behavior");
-    } catch (json::out_of_range&) {
-      // behavior is optional, default to empty string
+    if (json_config.contains("behavior")) {
+      set_behavior(json_config["behavior"]);
     }
 
-    try {
-      invert = json_config.at("invert");
-    } catch (json::out_of_range&) {
-      // invert is optional, default to false
+    if (json_config.contains("invert")) {
+      set_invert(json_config["invert"]);
     }
   } else if (type == "Digits") {
-    try {
-      individual_digits = json_config.at("individual_digits");
-    } catch (json::out_of_range&) {
+    if (json_config.contains("individual_digits")) {
+      set_individual_digits(json_config["individual_digits"]);
     }
   } else if (type == "ByteLevel") {
-    try {
-      add_prefix_space = json_config.at("add_prefix_space");
-    } catch (json::out_of_range&) {
+    if (json_config.contains("add_prefix_space")) {
+      set_add_prefix_space(json_config["add_prefix_space"]);
     }
-    // TODO: trim_offsets, use_regex
+    if (json_config.contains("use_regex")) {
+      set_use_regex(json_config["use_regex"]);
+    }
+    // TODO: trim_offsets
   } else if (type == "Sequence") {
-    pretokenizers = std::vector<PreTokenizerConfig>();
+    std::vector<PreTokenizerConfig> cfgs;
     for (const auto& entry : json_config.at("pretokenizers")) {
-      pretokenizers->push_back(PreTokenizerConfig().parse_json(entry));
+      cfgs.push_back(PreTokenizerConfig().parse_json(entry));
     }
+    set_pretokenizers(std::move(cfgs));
+  } else if (type == "BertPreTokenizer") {
+    // BertPreTokenizer has no additional configuration parameters
   } else {
     throw std::runtime_error("Unsupported PreTokenizer type: " + type);
   }
   return *this;
 }
 
-// RegexPreTokenizer ///////////////////////////////////////////////////////////
+// RegexPreTokenizer
+// ///////////////////////////////////////////////////////////
 
 std::unique_ptr<IRegex> RegexPreTokenizer::create_regex_(
     const std::string& pattern) {
@@ -167,13 +164,20 @@ std::vector<std::string> RegexPreTokenizer::pre_tokenize(
     return {};
   }
 
+  static int regex_debug_count = 0;
+  if (regex_debug_count < 3) {
+    std::cout << "[RegexPreTokenizer] Input: \"" << input.substr(0, 50) << "..." << "\"" << std::endl;
+    regex_debug_count++;
+  }
+
   std::vector<std::string> results;
   auto matches = regex_->find_all(input);
 
   if (!is_delimiter_) {
     // Original behavior: return the matches themselves
     for (const auto& match : matches) {
-      results.push_back(input.substr(match.start, match.end - match.start));
+      std::string piece = input.substr(match.start, match.end - match.start);
+      results.push_back(piece);
     }
   } else {
     // Delimiter behavior
@@ -253,7 +257,8 @@ std::vector<std::string> RegexPreTokenizer::pre_tokenize(
   return results;
 }
 
-// ByteLevelPreTokenizer ///////////////////////////////////////////////////////
+// ByteLevelPreTokenizer
+// ///////////////////////////////////////////////////////
 
 //////////////////
 // Impl Details //
@@ -273,12 +278,23 @@ constexpr char GPT2_EXPR[] =
 
 ByteLevelPreTokenizer::ByteLevelPreTokenizer(
     bool add_prefix_space,
-    const std::string& pattern)
+    const std::string& pattern,
+    bool use_regex)
     : pattern_(pattern.empty() ? GPT2_EXPR : pattern),
-      add_prefix_space_(add_prefix_space) {}
+      add_prefix_space_(add_prefix_space),
+      use_regex_(use_regex) {}
 
 std::vector<std::string> ByteLevelPreTokenizer::pre_tokenize(
     const std::string& input) const {
+  // If use_regex is false, skip regex splitting and only apply byte encoding
+  if (!use_regex_) {
+    std::string encoded;
+    for (unsigned char byte : input) {
+      encoded += unicode_byte_to_utf8(byte);
+    }
+    return {encoded};
+  }
+
   // Add the prefix space if configured to do so.
   std::string formatted_input = input;
   if (add_prefix_space_ && !formatted_input.empty() &&
@@ -286,10 +302,15 @@ std::vector<std::string> ByteLevelPreTokenizer::pre_tokenize(
     formatted_input.insert(formatted_input.begin(), ' ');
   }
 
-  return unicode_regex_split(formatted_input, {pattern_});
+  // Split using regex
+  // Note: unicode_regex_split automatically applies byte encoding
+  auto pieces = unicode_regex_split(formatted_input, {pattern_});
+
+  return pieces;
 }
 
-// SequencePreTokenizer ////////////////////////////////////////////////////////
+// SequencePreTokenizer
+// ////////////////////////////////////////////////////////
 
 SequencePreTokenizer::SequencePreTokenizer(
     std::vector<PreTokenizer::Ptr> pre_tokenizers)
@@ -308,6 +329,86 @@ std::vector<std::string> SequencePreTokenizer::pre_tokenize(
     pieces = std::move(new_pieces);
   }
   return pieces;
+}
+
+// BertPreTokenizer
+// ////////////////////////////////////////////////////////
+
+namespace {
+bool is_bert_punc(uint32_t cp) {
+  if ((cp >= 33 && cp <= 47) || (cp >= 58 && cp <= 64) ||
+      (cp >= 91 && cp <= 96) || (cp >= 123 && cp <= 126)) {
+    return true;
+  }
+  return unicode_cpt_flags(cp).is_punctuation;
+}
+
+bool is_cjk(uint32_t c) {
+  return (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF) ||
+      (c >= 0x20000 && c <= 0x2A6DF) || (c >= 0x2A700 && c <= 0x2B73F) ||
+      (c >= 0x2B740 && c <= 0x2B81F) || (c >= 0x2B920 && c <= 0x2CEAF) ||
+      (c >= 0xF900 && c <= 0xFAFF) || (c >= 0x2F800 && c <= 0x2FA1F);
+}
+} // namespace
+
+std::vector<std::string> BertPreTokenizer::pre_tokenize(
+    const std::string& input) const {
+  // 1. Split by whitespace (behavior: Removed)
+  std::vector<std::string> words;
+  std::vector<uint32_t> cpts = unicode_cpts_from_utf8(input);
+  std::vector<uint32_t> current_word;
+  for (uint32_t cp : cpts) {
+    if (unicode_cpt_flags(cp).is_whitespace) {
+      if (!current_word.empty()) {
+        std::string s;
+        for (uint32_t wcp : current_word) {
+          s += unicode_cpt_to_utf8(wcp);
+        }
+        words.push_back(s);
+        current_word.clear();
+      }
+    } else {
+      current_word.push_back(cp);
+    }
+  }
+  if (!current_word.empty()) {
+    std::string s;
+    for (uint32_t wcp : current_word) {
+      s += unicode_cpt_to_utf8(wcp);
+    }
+    words.push_back(s);
+  }
+
+  // 2. Split by punctuation and CJK (behavior: Isolated)
+  std::vector<std::string> final_tokens;
+  for (const auto& word : words) {
+    std::vector<uint32_t> word_cpts = unicode_cpts_from_utf8(word);
+    std::vector<uint32_t> current_token;
+    for (uint32_t cp : word_cpts) {
+      if (is_bert_punc(cp) || is_cjk(cp)) {
+        if (!current_token.empty()) {
+          std::string s;
+          for (uint32_t tcp : current_token) {
+            s += unicode_cpt_to_utf8(tcp);
+          }
+          final_tokens.push_back(s);
+          current_token.clear();
+        }
+        final_tokens.push_back(unicode_cpt_to_utf8(cp));
+      } else {
+        current_token.push_back(cp);
+      }
+    }
+    if (!current_token.empty()) {
+      std::string s;
+      for (uint32_t tcp : current_token) {
+        s += unicode_cpt_to_utf8(tcp);
+      }
+      final_tokens.push_back(s);
+    }
+  }
+
+  return final_tokens;
 }
 
 } // namespace tokenizers

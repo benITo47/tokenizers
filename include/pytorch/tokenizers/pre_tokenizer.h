@@ -53,11 +53,11 @@ class PreTokenizer {
 // -- Factory ------------------------------------------------------------------
 
 // Helper macro to standardize addition of config member fields
-#define CONFIG_MEMBER(type, name)            \
-  std::optional<type> name;                  \
-  PreTokenizerConfig& set_##name(type arg) { \
-    this->name = std::move(arg);             \
-    return *this;                            \
+#define PRETOKENIZER_CONFIG_MEMBER(type, name) \
+  std::optional<type> name;                    \
+  PreTokenizerConfig& set_##name(type arg) {   \
+    this->name = std::move(arg);               \
+    return *this;                              \
   }
 
 /**
@@ -92,37 +92,43 @@ class PreTokenizerConfig {
   /**
    * Used by: RegexPreTokenizer, ByteLevelPreTokenizer
    */
-  CONFIG_MEMBER(std::string, pattern)
+  PRETOKENIZER_CONFIG_MEMBER(std::string, pattern)
 
   /**
    * Used by: DigitsPreTokenizer
    */
-  CONFIG_MEMBER(bool, individual_digits)
+  PRETOKENIZER_CONFIG_MEMBER(bool, individual_digits)
 
   /**
    * Used by: ByteLevelPreTokenizer
    */
-  CONFIG_MEMBER(bool, add_prefix_space)
+  PRETOKENIZER_CONFIG_MEMBER(bool, add_prefix_space)
+
+  /**
+   * Used by: ByteLevelPreTokenizer
+   */
+  PRETOKENIZER_CONFIG_MEMBER(bool, use_regex)
 
   /**
    * Used by RegexPreTokenizer
    */
-  CONFIG_MEMBER(bool, is_delimiter)
+  PRETOKENIZER_CONFIG_MEMBER(bool, is_delimiter)
 
   /**
    * Used by RegexPreTokenizer - Split behavior
    */
-  CONFIG_MEMBER(std::string, behavior)
+  PRETOKENIZER_CONFIG_MEMBER(std::string, behavior)
 
   /**
    * Used by RegexPreTokenizer - Split invert flag
    */
-  CONFIG_MEMBER(bool, invert)
+  PRETOKENIZER_CONFIG_MEMBER(bool, invert)
 
   /**
    * Used by: SequencePreTokenizer
    */
-  CONFIG_MEMBER(std::vector<PreTokenizerConfig>, pretokenizers)
+  using Configs = std::vector<PreTokenizerConfig>;
+  PRETOKENIZER_CONFIG_MEMBER(Configs, pretokenizers)
 
   /*----------------*/
   /* Public methods */
@@ -227,12 +233,15 @@ class ByteLevelPreTokenizer : public PreTokenizer {
    * @param add_prefix_space: Whether to add a leading space to the first word
    * @param pattern: A user-supplied regex to use for token splitting. If not
    *    provided, it use the standard GPT2 pattern.
+   * @param use_regex: Whether to use regex for splitting. If false, only apply
+   *    byte encoding without splitting.
    */
   ByteLevelPreTokenizer(
       bool add_prefix_space = true,
-      const std::string& pattern = "");
+      const std::string& pattern = "",
+      bool use_regex = true);
   explicit ByteLevelPreTokenizer(const std::string& pattern)
-      : ByteLevelPreTokenizer(true, pattern) {}
+      : ByteLevelPreTokenizer(true, pattern, true) {}
 
   /** Perform pre-tokenization */
   std::vector<std::string> pre_tokenize(
@@ -241,6 +250,7 @@ class ByteLevelPreTokenizer : public PreTokenizer {
  private:
   const std::string pattern_;
   const bool add_prefix_space_;
+  const bool use_regex_;
 
 }; // end class ByteLevelPreTokenizer
 
@@ -263,6 +273,21 @@ class SequencePreTokenizer : public PreTokenizer {
  private:
   const std::vector<PreTokenizer::Ptr> pre_tokenizers_;
 
-}; // end class ByteLevelPreTokenizer
+}; // end class SequencePreTokenizer
+
+// -- Bert ---------------------------------------------------------------------
+// Used for BERT-style pre-tokenization (splitting on whitespace and
+// punctuation) CITE:
+// https://github.com/huggingface/tokenizers/blob/main/tokenizers/src/pre_tokenizers/bert.rs
+
+class BertPreTokenizer : public PreTokenizer {
+ public:
+  BertPreTokenizer() = default;
+
+  /** Perform BERT pre-tokenization */
+  std::vector<std::string> pre_tokenize(
+      const std::string& input) const override;
+
+}; // end class BertPreTokenizer
 
 } // namespace tokenizers

@@ -170,9 +170,7 @@ TEST_F(StringIntegerMapTest, CreateFromModel) {
   const auto res = loadModel();
   ASSERT_EQ(res.ok(), true);
   const auto& model = res.get();
-  auto map_result = StringIntegerMap<>::create(model);
-  ASSERT_TRUE(map_result.ok());
-  auto map = std::move(*map_result);
+  StringIntegerMap map(model);
 
   for (const auto& [model_key, model_value] : model) {
     EXPECT_THAT(map.tryGetInteger(model_key), testing::Optional(model_value))
@@ -208,10 +206,8 @@ TEST_F(StringIntegerMapTest, MemoryConsumptionComparison) {
 
   std::size_t string_integer_map_size = 0;
   {
-    auto map_result = StringIntegerMapTypeBuilder<>::WithAllocator<
-        TrackingAllocator<std::uint8_t>>::Map::create(model);
-    ASSERT_TRUE(map_result.ok());
-    auto map = std::move(*map_result);
+    typename StringIntegerMapTypeBuilder<>::WithAllocator<
+        TrackingAllocator<std::uint8_t>>::Map map(model);
     string_integer_map_size = TrackingAllocatorBase::getSize();
   }
 
@@ -290,9 +286,7 @@ TYPED_TEST(StringIntegerMapHashTest, HashCollisions) {
       {"d", 3},
   };
 
-  auto map_result = TestFixture::Container::create(source);
-  ASSERT_TRUE(map_result.ok());
-  auto map = std::move(*map_result);
+  typename TestFixture::Container map(source);
 
   //
   // Check that the strings exist in the map.
@@ -327,37 +321,4 @@ TYPED_TEST(StringIntegerMapHashTest, HashCollisions) {
   EXPECT_FALSE(map.tryGetString(10));
   EXPECT_FALSE(map.tryGetString(100));
   EXPECT_FALSE(map.tryGetString(1000));
-}
-
-TEST(StringIntegerMapCreateTest, DetectsDuplicateTokens) {
-  std::unordered_map<std::string, std::uint64_t> source = {
-      {"a", 0},
-      {"b", 1},
-      {"c", 2},
-  };
-
-  // No duplicates — should succeed.
-  auto result = StringIntegerMap<>::create(source);
-  ASSERT_TRUE(result.ok());
-
-  // Introduce a duplicate token via a vector of pairs.
-  std::vector<std::pair<std::string, std::uint64_t>> pairs = {
-      {"a", 0},
-      {"b", 1},
-      {"a", 2}, // duplicate token "a"
-  };
-  auto dup_result = StringIntegerMap<>::create(pairs);
-  EXPECT_FALSE(dup_result.ok());
-  EXPECT_EQ(dup_result.error(), Error::ParseFailure);
-}
-
-TEST(StringIntegerMapCreateTest, DetectsDuplicateRanks) {
-  std::vector<std::pair<std::string, std::uint64_t>> pairs = {
-      {"a", 0},
-      {"b", 1},
-      {"c", 1}, // duplicate rank 1
-  };
-  auto result = StringIntegerMap<>::create(pairs);
-  EXPECT_FALSE(result.ok());
-  EXPECT_EQ(result.error(), Error::ParseFailure);
 }

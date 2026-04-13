@@ -130,7 +130,6 @@ runtime.cxx_library(
     srcs = [
         "src/hf_tokenizer.cpp",
         "src/normalizer.cpp",
-        "src/post_processor.cpp",
         "src/pre_tokenizer.cpp",
         "src/token_decoder.cpp",
     ],

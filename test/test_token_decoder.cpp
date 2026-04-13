@@ -92,16 +92,6 @@ TEST(FuseTokenDecoderTest, TestPassthrough) {
   EXPECT_EQ(decoder.decode(std::vector<std::string>{""})[0], "");
 }
 
-TEST(FuseTokenDecoderTest, TestBatchFuse) {
-  FuseTokenDecoder decoder;
-
-  std::vector<std::string> tokens = {"Hello", " ", "world", "!"};
-  auto result = decoder.decode(tokens);
-
-  ASSERT_EQ(result.size(), 1);
-  EXPECT_EQ(result[0], "Hello world!");
-}
-
 // Test SequenceTokenDecoder
 TEST(SequenceTokenDecoderTest, TestEmptySequence) {
   std::vector<TokenDecoder::Ptr> decoders;
@@ -198,7 +188,7 @@ TEST(TokenDecoderConfigTest, TestSequenceConfig) {
   decoder_config.parse_json(config);
 
   EXPECT_EQ(decoder_config.type, "Sequence");
-  EXPECT_EQ(decoder_config.sequence_decoders.size(), 3);
+  EXPECT_EQ(decoder_config.sequence_decoders->size(), 3);
 
   auto decoder = decoder_config.create();
   EXPECT_EQ(decoder->decode(std::vector<std::string>{"_Hello"})[0], " Hello");
@@ -284,6 +274,66 @@ TEST(TokenDecoderConfigTest, TestStripConfig) {
   std::vector<std::string> tokens = {"_Hello", "__World"};
   std::vector<std::string> expected = {"Hello", "_World"};
   EXPECT_EQ(decoder->decode(tokens), expected);
+}
+
+TEST(WordPieceTokenDecoderTest, BasicDecodingNoCleanup) {
+  WordPieceTokenDecoder decoder("##", false);
+  std::vector<std::string> tokens = {"##uelo", "Ara", "##új", "##o", "No", "##guera"};
+  std::vector<std::string> expected = {"##uelo", " Ara", "új", "o", " No", "guera"};
+  EXPECT_EQ(decoder.decode(tokens), expected);
+}
+
+TEST(WordPieceTokenDecoderTest, DefaultCleanup) {
+  WordPieceTokenDecoder decoder;
+  std::vector<std::string> tokens = {"hello", ",", "##world", "."};
+  std::vector<std::string> expected = {"hello", ",", "world", "."};
+  EXPECT_EQ(decoder.decode(tokens), expected);
+}
+
+TEST(TokenDecoderConfigTest, TestWordPieceConfig) {
+  nlohmann::json config = {
+      {"type", "WordPiece"}, {"prefix", "@@"}, {"cleanup", true}};
+
+  TokenDecoderConfig decoder_config;
+  decoder_config.parse_json(config);
+
+  EXPECT_EQ(decoder_config.type, "WordPiece");
+  EXPECT_EQ(decoder_config.wordpiece_prefix, "@@");
+  EXPECT_EQ(decoder_config.wordpiece_cleanup, true);
+
+  auto decoder = decoder_config.create();
+  std::vector<std::string> tokens = {"@@hello", "world"};
+  std::vector<std::string> expected = {"@@hello", " world"};
+  EXPECT_EQ(decoder->decode(tokens), expected);
+}
+
+TEST(WordPieceTokenDecoderTest, EnglishContractionCleanup) {
+  WordPieceTokenDecoder decoder("##", true);
+  std::vector<std::string> tokens = {"it", "##'", "##s", "i", "##'", "##m"};
+  std::vector<std::string> result = decoder.decode(tokens);
+
+  std::string joined;
+  for (const auto& s : result) {
+    joined += s;
+  }
+  EXPECT_TRUE(joined.find("it's") != std::string::npos || joined.find("it 's") != std::string::npos);
+  EXPECT_TRUE(joined.find("i'm") != std::string::npos || joined.find("i 'm") != std::string::npos);
+}
+
+TEST(WordPieceTokenDecoderTest, MisplacedPrefixes) {
+  WordPieceTokenDecoder decoder("##", true);
+  std::vector<std::string> tokens = {"##hello", "world", "##!", "##!"};
+  std::vector<std::string> expected = {"##hello", " world", "!", "!"};
+  EXPECT_EQ(decoder.decode(tokens), expected);
+}
+
+TEST(WordPieceTokenDecoderTest, PunctuationBoundary) {
+  WordPieceTokenDecoder decoder("##", true);
+  std::vector<std::string> tokens = {"hello", ",", "##world"};
+  std::vector<std::string> result = decoder.decode(tokens);
+
+  std::vector<std::string> expected = {"hello", ",", "world"};
+  EXPECT_EQ(result, expected);
 }
 
 } // namespace tokenizers

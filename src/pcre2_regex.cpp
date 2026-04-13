@@ -13,19 +13,11 @@
 
 namespace tokenizers {
 
-// Helper function to check if error code is a UTF-8 validation error
-// PCRE2 UTF-8 error codes range from PCRE2_ERROR_UTF8_ERR1 (-3) to
-// PCRE2_ERROR_UTF8_ERR21 (-23)
-static bool is_utf8_error(int error_code) {
-  return error_code >= PCRE2_ERROR_UTF8_ERR21 &&
-      error_code <= PCRE2_ERROR_UTF8_ERR1;
-}
-
 Error Pcre2Regex::compile(const std::string& pattern) {
   int error_code;
   PCRE2_SIZE error_offset;
 
-  // Compile the pattern with UTF-8 mode enabled first
+  // Compile the pattern
   regex_ = pcre2_compile(
       reinterpret_cast<PCRE2_SPTR>(pattern.c_str()),
       pattern.length(),
@@ -37,42 +29,12 @@ Error Pcre2Regex::compile(const std::string& pattern) {
   if (regex_ == nullptr) {
     PCRE2_UCHAR error_buffer[256];
     pcre2_get_error_message(error_code, error_buffer, sizeof(error_buffer));
-
-    // Check if this is a UTF-8 validation error
-    if (is_utf8_error(error_code)) {
-      TK_LOG(
-          Info,
-          "PCRE2 UTF-8 validation failed at offset %" PRId64
-          ": %s. Retrying without UTF flags.",
-          static_cast<int64_t>(error_offset),
-          error_buffer);
-
-      // Retry compilation without PCRE2_UTF flag
-      regex_ = pcre2_compile(
-          reinterpret_cast<PCRE2_SPTR>(pattern.c_str()),
-          pattern.length(),
-          PCRE2_UCP, // Enable Unicode properties but not UTF-8 validation
-          &error_code,
-          &error_offset,
-          nullptr);
-
-      if (regex_ == nullptr) {
-        pcre2_get_error_message(error_code, error_buffer, sizeof(error_buffer));
-        TK_LOG(
-            Error,
-            "PCRE2 compilation failed (without UTF) at offset %" PRId64 ": %s",
-            static_cast<int64_t>(error_offset),
-            error_buffer);
-        return Error::RegexFailure;
-      }
-    } else {
-      TK_LOG(
-          Error,
-          "PCRE2 compilation failed at offset %" PRId64 ": %s",
-          static_cast<int64_t>(error_offset),
-          error_buffer);
-      return Error::RegexFailure;
-    }
+    TK_LOG(
+        Error,
+        "PCRE2 compilation failed at offset %" PRId64 ": %s",
+        static_cast<int64_t>(error_offset),
+        error_buffer);
+    return Error::RegexFailure;
   }
 
   // Create match data

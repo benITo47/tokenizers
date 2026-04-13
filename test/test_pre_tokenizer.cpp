@@ -114,6 +114,69 @@ TEST_F(SequencePreTokenizerTest, PreTokenizeDigitAndByteLevel) {
        "."});
 }
 
+// BertPreTokenizer ////////////////////////////////////////////////////////////
+class BertPreTokenizerTest : public ::testing::Test {};
+
+TEST_F(BertPreTokenizerTest, Basic) {
+  BertPreTokenizer ptok;
+  assert_split_match(
+      ptok,
+      "Hey friend!     How are you?!?",
+      {"Hey", "friend", "!", "How", "are", "you", "?", "!", "?"});
+}
+
+TEST_F(BertPreTokenizerTest, ChineseChars) {
+  BertPreTokenizer ptok;
+  // Note: BertNormalizer handles adding spaces around Chinese characters.
+  // We simulate the normalized string here.
+  assert_split_match(
+      ptok,
+      " 野  口  里  佳  Noguchi Rika",
+      {"野", "口", "里", "佳", "Noguchi", "Rika"});
+}
+
+// -- Extended BertPreTokenizer Tests ------------------------------------------
+
+TEST_F(BertPreTokenizerTest, PunctuationSplitting) {
+  BertPreTokenizer ptok;
+  // BERT should isolate every punctuation mark into its own token
+  assert_split_match(ptok, "hello,world!", {"hello", ",", "world", "!"});
+
+  assert_split_match(ptok, "one(two)three", {"one", "(", "two", ")", "three"});
+}
+
+TEST_F(BertPreTokenizerTest, MultipleWhitespaces) {
+  BertPreTokenizer ptok;
+  // BERT should collapse/ignore multiple spaces and tabs
+  assert_split_match(ptok, "hello \t \n world", {"hello", "world"});
+}
+
+TEST_F(BertPreTokenizerTest, CJKAndPunctuationMix) {
+  BertPreTokenizer ptok;
+
+  // BERT treats CJK characters as individual units (handled by Normalizer
+  // usually)
+
+  // but the pre-tokenizer must ensure they aren't clumped with punctuation.
+
+  // Note: BertNormalizer adds spaces around CJK characters.
+
+  assert_split_match(ptok, "你好,world.", {"你", "好", ",", "world", "."});
+}
+
+TEST_F(BertPreTokenizerTest, Contractions) {
+  BertPreTokenizer ptok;
+  // BERT pre-tokenization splits on the apostrophe as punctuation
+  assert_split_match(ptok, "don't stop", {"don", "'", "t", "stop"});
+}
+
+TEST_F(BertPreTokenizerTest, NumbersAndSymbols) {
+  BertPreTokenizer ptok;
+  // Verify symbols like $ or % are treated as punctuation tokens
+  assert_split_match(
+      ptok, "Cost: $100.00", {"Cost", ":", "$", "100", ".", "00"});
+}
+
 // PreTokenizerConfig //////////////////////////////////////////////////////////
 //
 // NOTE: When adding a new pre-tokenizer or changing arguments, add it to these
@@ -143,6 +206,9 @@ TEST_F(PreTokenizerConfigTest, AllTypesSuccess) {
       .set_pretokenizers(
           {PreTokenizerConfig("Digits"), PreTokenizerConfig("ByteLevel")})
       .create();
+
+  // Bert
+  PreTokenizerConfig("BertPreTokenizer").create();
 }
 
 TEST_F(PreTokenizerConfigTest, AllTypesFailureCases) {

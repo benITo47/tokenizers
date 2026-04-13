@@ -163,11 +163,7 @@ Error Tekken::load(const std::string& tokenizer_path) {
     special_token_pairs.emplace_back(st.token_str, st.rank);
   }
 
-  auto special_token_map_result = TokenMap::create(special_token_pairs);
-  if (!special_token_map_result.ok()) {
-    return special_token_map_result.error();
-  }
-  special_token_map_.emplace(std::move(*special_token_map_result));
+  special_token_map_.emplace(TokenMap(special_token_pairs));
 
   // Initialize regex with the pattern from config
   auto regex_result = create_regex(_pattern);
