@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <pytorch/tokenizers/map_utils.h>
@@ -33,7 +34,9 @@ class BPEModel : public Model {
       bool byte_fallback,
       std::optional<uint64_t> unk_token_id,
       std::optional<uint64_t> bos_token_id,
-      std::optional<uint64_t> eos_token_id);
+      std::optional<uint64_t> eos_token_id,
+      std::unordered_set<std::string> rstrip_tokens = {},
+      std::unordered_set<std::string> lstrip_tokens = {});
 
   ~BPEModel() override = default;
 
@@ -56,6 +59,13 @@ class BPEModel : public Model {
   std::pair<std::optional<std::string>, std::string>
   split_with_allowed_special_token(const std::string& input, size_t offset)
       const override;
+
+  bool special_token_has_rstrip(const std::string& token) const override {
+    return rstrip_tokens_.count(token) > 0;
+  }
+  bool special_token_has_lstrip(const std::string& token) const override {
+    return lstrip_tokens_.count(token) > 0;
+  }
 
   uint64_t bos_token_id() const override {
     return bos_token_id_.value_or(0);
@@ -86,6 +96,8 @@ class BPEModel : public Model {
   std::optional<uint64_t> unk_token_id_;
   std::optional<uint64_t> bos_token_id_;
   std::optional<uint64_t> eos_token_id_;
+  std::unordered_set<std::string> rstrip_tokens_;
+  std::unordered_set<std::string> lstrip_tokens_;
 
   bool initialized_ = false;
   int32_t vocab_size_ = 0;

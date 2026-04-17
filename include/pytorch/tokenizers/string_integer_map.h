@@ -248,12 +248,17 @@ StringIntegerMap<TStringHash, TIntegerHash, TAllocator>::StringIntegerMap(
 
   integer_ = VariableSizedInteger<std::uint64_t>(largest_integer);
   string_size_ = VariableSizedInteger<std::size_t>(largest_string_size);
-  string_offset_ = VariableSizedInteger<std::size_t>(total_string_size);
 
   const auto string_element_data_size =
       ((integer_.getByteCount() + string_size_.getByteCount() + 1) *
        map.size()) +
       total_string_size;
+
+  // string_offset_ stores byte offsets into string_element_data_, which
+  // includes per-element headers (integer + string_size + small_hash bytes)
+  // on top of the raw string data. Must be sized against the full buffer,
+  // not just total_string_size, to avoid truncating offsets > 255.
+  string_offset_ = VariableSizedInteger<std::size_t>(string_element_data_size);
   const auto integer_element_size = integer_.getByteCount() +
       string_offset_.getByteCount() + string_size_.getByteCount();
   const auto integer_element_data_size = integer_element_size * map.size();

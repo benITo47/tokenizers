@@ -38,9 +38,14 @@ Error parse_special_tokens(
       const auto& added_tokens = json_config.at("added_tokens");
       std::vector<std::pair<std::string, uint64_t>> sp_pairs;
       for (const auto& entry : added_tokens) {
-        sp_pairs.emplace_back(
-            entry.at("content").get<std::string>(),
-            entry.at("id").get<uint64_t>());
+        std::string content = entry.at("content").get<std::string>();
+        sp_pairs.emplace_back(content, entry.at("id").get<uint64_t>());
+        if (entry.value("rstrip", false)) {
+          config.rstrip_tokens.insert(content);
+        }
+        if (entry.value("lstrip", false)) {
+          config.lstrip_tokens.insert(content);
+        }
       }
       config.set_special_token_pairs(std::move(sp_pairs));
     }
@@ -302,7 +307,9 @@ Model::Ptr ModelConfig::create() const {
         byte_fallback.value_or(false),
         ids.unk_token_id,
         ids.bos_token_id,
-        ids.eos_token_id);
+        ids.eos_token_id,
+        rstrip_tokens,
+        lstrip_tokens);
 
   } else if (type == "WordPiece") {
     std::string unk = unk_token.value_or("[UNK]");

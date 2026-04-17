@@ -99,7 +99,9 @@ BPEModel::BPEModel(
     bool byte_fallback,
     std::optional<uint64_t> unk_token_id,
     std::optional<uint64_t> bos_token_id,
-    std::optional<uint64_t> eos_token_id)
+    std::optional<uint64_t> eos_token_id,
+    std::unordered_set<std::string> rstrip_tokens,
+    std::unordered_set<std::string> lstrip_tokens)
     : token_map_(std::move(token_map)),
       special_token_map_(std::move(special_token_map)),
       merge_ranks_(std::move(merge_ranks)),
@@ -107,7 +109,9 @@ BPEModel::BPEModel(
       byte_fallback_(byte_fallback),
       unk_token_id_(unk_token_id),
       bos_token_id_(bos_token_id),
-      eos_token_id_(eos_token_id) {
+      eos_token_id_(eos_token_id),
+      rstrip_tokens_(std::move(rstrip_tokens)),
+      lstrip_tokens_(std::move(lstrip_tokens)) {
   vocab_size_ = token_map_.size() + special_token_map_.size();
   initialized_ = true;
 }
@@ -186,7 +190,7 @@ BPEModel::encode_with_special_token(const std::string& text) const {
 
       tokens.push_back(*result);
       last_piece_token_len = 0;
-      offset += special->size(); // advance past the matched token
+      offset += special->size();
     } else {
       break;
     }

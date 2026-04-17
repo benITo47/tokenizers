@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -98,6 +99,13 @@ class Model {
 
   virtual uint64_t bos_token_id() const = 0;
   virtual uint64_t eos_token_id() const = 0;
+
+  virtual bool special_token_has_rstrip(const std::string& token) const {
+    return false;
+  }
+  virtual bool special_token_has_lstrip(const std::string& token) const {
+    return false;
+  }
 };
 
 // -- Factory ------------------------------------------------------------------
@@ -121,6 +129,11 @@ class ModelConfig {
   using TokenPairs = std::vector<std::pair<std::string, uint64_t>>;
   MODEL_CONFIG_MEMBER(TokenPairs, token_pairs)
   MODEL_CONFIG_MEMBER(TokenPairs, special_token_pairs)
+
+  // Tokens with rstrip=true consume leading whitespace after the token;
+  // tokens with lstrip=true consume trailing whitespace before the token.
+  std::unordered_set<std::string> rstrip_tokens;
+  std::unordered_set<std::string> lstrip_tokens;
 
   MODEL_CONFIG_MEMBER(std::vector<std::string>, merges)
   MODEL_CONFIG_MEMBER(bool, byte_fallback)

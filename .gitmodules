@@ -13,3 +13,6 @@
 [submodule "third-party/pcre2"]
 	path = third-party/pcre2
 	url = https://github.com/PCRE2Project/pcre2.git
+[submodule "test/third-party/tokenizers-cpp"]
+	path = test/third-party/tokenizers-cpp
+	url = https://github.com/mlc-ai/tokenizers-cpp

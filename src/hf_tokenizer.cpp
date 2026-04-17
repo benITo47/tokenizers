@@ -92,22 +92,27 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
   }
 
   std::vector<uint64_t> tokens;
-  std::string current_input = input;
   size_t offset = 0;
 
   while (offset < input.size()) {
     auto [special, sub_input] =
         _model->split_with_allowed_special_token(input, offset);
 
-    // 1. Process regular text segment
+    // lstrip: preserve original size for offset advancement, strip trailing
+    // spaces from sub_input so they aren't encoded before the special token
+    const size_t original_sub_size = sub_input.size();
+    if (special && _model->special_token_has_lstrip(*special)) {
+      while (!sub_input.empty() && sub_input.back() == ' ') {
+        sub_input.pop_back();
+      }
+    }
+
     if (!sub_input.empty()) {
-      // a. Normalization
       std::string normalized_segment = sub_input;
       if (_normalizer) {
         normalized_segment = _normalizer->normalize(sub_input);
       }
 
-      // b. Pre-tokenization
       std::vector<std::string> pieces;
       if (_pretokenizer) {
         pieces = _pretokenizer->pre_tokenize(normalized_segment);
@@ -115,7 +120,6 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
         pieces.push_back(normalized_segment);
       }
 
-      // c. Model Tokenize
       for (const auto& piece : pieces) {
         auto piece_tokens_result = _model->tokenize(piece);
         if (!piece_tokens_result.ok()) {
@@ -125,9 +129,8 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
         tokens.insert(tokens.end(), piece_tokens.begin(), piece_tokens.end());
       }
     }
-    offset += sub_input.size();
+    offset += original_sub_size;
 
-    // 2. Process special token
     if (special) {
       auto id_res = _model->piece_to_id(*special);
       if (!id_res.ok()) {
@@ -135,6 +138,13 @@ HFTokenizer::encode(const std::string& input, int8_t bos, int8_t eos) const {
       }
       tokens.push_back(*id_res);
       offset += special->size();
+
+      // rstrip: skip leading spaces after this token
+      if (_model->special_token_has_rstrip(*special)) {
+        while (offset < input.size() && input[offset] == ' ') {
+          ++offset;
+        }
+      }
     } else {
       break;
     }
